@@ -54,7 +54,7 @@ def generate_requirements(resolved: list[dict]) -> str:
         version = entry["packageVersion"]
         sha256 = entry["sha256"]
         url = entry["url"]
-        lines.append(f"{name}=={version} --hash=sha256:{sha256} @ {url}")
+        lines.append(f"{name} @ {url} --hash=sha256:{sha256}")
     return "\n".join(lines)
 
 
@@ -91,17 +91,15 @@ def run_module(at_uri: str) -> None:
             check=True,
         )
 
-        # Find the root package (first in the resolved list by convention,
-        # or we can try to detect which one has console_scripts)
-        # For now, use the first package as the entry point
-        root_package = resolved[0]["packageName"]
+        package = record.get("package")
+        if not package:
+            raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
-        # Run via uv
         subprocess.run(
             [
                 "uv", "run",
                 "--python", str(venv_path / "bin" / "python"),
-                root_package,
+                package,
             ],
             check=True,
         )

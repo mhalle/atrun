@@ -21,6 +21,10 @@
             "type": "string",
             "maxLength": 64
           },
+          "package": {
+            "type": "string",
+            "maxLength": 256
+          },
           "resolved": {
             "type": "array",
             "items": { "type": "ref", "ref": "#depEntry" },

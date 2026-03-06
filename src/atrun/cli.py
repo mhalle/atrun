@@ -27,8 +27,10 @@ def login(handle: str):
 @click.argument("directory", default=".", type=click.Path(exists=True, path_type=Path))
 @click.option("--python-version", help="Python version (e.g. 3.12)")
 @click.option("--platform", help="Platform (e.g. linux-x86_64)")
+@click.option("--wheel", type=click.Path(exists=True, path_type=Path), help="Local wheel file to include.")
+@click.option("--wheel-url", help="Public URL where the wheel is hosted.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing.")
-def publish(directory: Path, python_version: str | None, platform: str | None, dry_run: bool):
+def publish(directory: Path, python_version: str | None, platform: str | None, wheel: Path | None, wheel_url: str | None, dry_run: bool):
     """Publish uv.lock as an AT Protocol record."""
     from .publish import build_record, publish as do_publish
 
@@ -36,12 +38,15 @@ def publish(directory: Path, python_version: str | None, platform: str | None, d
     if not lock_path.exists():
         raise click.ClickException(f"No uv.lock found in {directory}")
 
+    if bool(wheel) != bool(wheel_url):
+        raise click.ClickException("--wheel and --wheel-url must be used together.")
+
     if dry_run:
-        record = build_record(lock_path, python_version=python_version, platform=platform)
+        record = build_record(lock_path, python_version=python_version, platform=platform, wheel_path=wheel, wheel_url=wheel_url)
         click.echo(json.dumps(record, indent=2))
         return
 
-    at_uri = do_publish(lock_path, python_version=python_version, platform=platform)
+    at_uri = do_publish(lock_path, python_version=python_version, platform=platform, wheel_path=wheel, wheel_url=wheel_url)
     click.echo(at_uri)
 
 

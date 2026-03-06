@@ -52,6 +52,76 @@ def publish(directory: Path, python_version: str | None, platform: str | None, w
 
 @cli.command()
 @click.argument("at_uri")
+def cat(at_uri: str):
+    """Fetch an AT URI and print the full record as JSON."""
+    from .run import fetch_record
+
+    record = fetch_record(at_uri)
+    click.echo(json.dumps(record, indent=2))
+
+
+@cli.command()
+@click.argument("at_uri")
+def resolve(at_uri: str):
+    """Fetch an AT URI and print requirements.txt to stdout."""
+    from .run import fetch_record, generate_requirements
+
+    record = fetch_record(at_uri)
+    resolved = record.get("resolved", [])
+    if not resolved:
+        raise click.ClickException("Record has no resolved packages.")
+    click.echo(generate_requirements(resolved))
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.argument("at_uri")
+@click.argument("uv_args", nargs=-1, type=click.UNPROCESSED)
+@click.option("--dry-run", "install_dry_run", is_flag=True, help="Print the uv command without running it.")
+def install(at_uri: str, uv_args: tuple[str, ...], install_dry_run: bool):
+    """Install a module as a uv tool from an AT URI.
+
+    Extra arguments are passed through to uv tool install.
+    """
+    import shlex
+    import subprocess
+    import tempfile
+
+    from .run import fetch_record, generate_requirements
+
+    record = fetch_record(at_uri)
+    package = record.get("package")
+    if not package:
+        raise click.ClickException("Record has no 'package' field.")
+    resolved = record.get("resolved", [])
+    if not resolved:
+        raise click.ClickException("Record has no resolved packages.")
+
+    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    if not pkg_entry:
+        raise click.ClickException(f"Package '{package}' not found in resolved list.")
+
+    requirements = generate_requirements(resolved)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="atrun-", delete=False) as f:
+        f.write(requirements)
+        req_path = f.name
+
+    cmd = [
+        "uv", "tool", "install",
+        f"{package} @ {pkg_entry['url']}",
+        "--with-requirements", req_path,
+        *uv_args,
+    ]
+
+    if install_dry_run:
+        click.echo(shlex.join(cmd))
+        return
+
+    subprocess.run(cmd, check=True)
+
+
+@cli.command()
+@click.argument("at_uri")
 def run(at_uri: str):
     """Run a module from an AT URI."""
     from .run import run_module

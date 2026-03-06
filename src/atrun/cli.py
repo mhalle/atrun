@@ -2,6 +2,7 @@
 
 import getpass
 import json
+import sys
 from pathlib import Path
 
 import click
@@ -24,29 +25,29 @@ def login(handle: str):
 
 
 @cli.command()
-@click.argument("directory", default=".", type=click.Path(exists=True, path_type=Path))
-@click.option("--python-version", help="Python version (e.g. 3.12)")
-@click.option("--platform", help="Platform (e.g. linux-x86_64)")
-@click.option("--wheel", type=click.Path(exists=True, path_type=Path), help="Local wheel file to include.")
-@click.option("--wheel-url", help="Public URL where the wheel is hosted.")
+@click.option("--lockfile", type=click.Path(), help="pylock.toml file, or - for stdin. Omit to run uv export.")
+@click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file to hash.")
+@click.option("--dist-url", help="Public URL where the distribution is hosted.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing.")
-def publish(directory: Path, python_version: str | None, platform: str | None, wheel: Path | None, wheel_url: str | None, dry_run: bool):
-    """Publish uv.lock as an AT Protocol record."""
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, dry_run: bool):
+    """Publish resolved dependencies as an AT Protocol record.
+
+    Without --lockfile, runs uv export to get the resolved lockfile.
+    """
     from .publish import build_record, publish as do_publish
 
-    lock_path = directory / "uv.lock"
-    if not lock_path.exists():
-        raise click.ClickException(f"No uv.lock found in {directory}")
-
-    if bool(wheel) != bool(wheel_url):
-        raise click.ClickException("--wheel and --wheel-url must be used together.")
+    lockfile_str = None
+    if lockfile == "-":
+        lockfile_str = sys.stdin.read()
+    elif lockfile:
+        lockfile_str = Path(lockfile).read_text()
 
     if dry_run:
-        record = build_record(lock_path, python_version=python_version, platform=platform, wheel_path=wheel, wheel_url=wheel_url)
+        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url)
         click.echo(json.dumps(record, indent=2))
         return
 
-    at_uri = do_publish(lock_path, python_version=python_version, platform=platform, wheel_path=wheel, wheel_url=wheel_url)
+    at_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url)
     click.echo(at_uri)
 
 
@@ -71,6 +72,41 @@ def resolve(at_uri: str):
     if not resolved:
         raise click.ClickException("Record has no resolved packages.")
     click.echo(generate_requirements(resolved))
+
+
+@cli.command()
+@click.argument("at_uri")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def info(at_uri: str, as_json: bool):
+    """Show package metadata for a published module."""
+    from .run import fetch_record
+    from .wheel import fetch_wheel_metadata
+
+    record = fetch_record(at_uri)
+    package = record.get("package")
+    if not package:
+        raise click.ClickException("Record has no 'package' field.")
+    resolved = record.get("resolved", [])
+
+    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    if not pkg_entry:
+        raise click.ClickException(f"Package '{package}' not found in resolved list.")
+
+    metadata = fetch_wheel_metadata(pkg_entry["url"])
+
+    if as_json:
+        click.echo(json.dumps(metadata, indent=2))
+        return
+
+    for key, value in metadata.items():
+        if key == "Description":
+            continue
+        if isinstance(value, list):
+            click.echo(f"{key}:")
+            for item in value:
+                click.echo(f"  {item}")
+        else:
+            click.echo(f"{key}: {value}")
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})

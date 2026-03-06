@@ -1,66 +1,65 @@
-"""Parse uv.lock files into resolved dependency entries."""
+"""Parse pylock.toml into resolved dependency entries."""
 
 from __future__ import annotations
 
+import subprocess
 import tomllib
-from pathlib import Path
 
 
-def parse_uv_lock(lock_path: Path) -> list[dict]:
-    """Parse a uv.lock file and return sorted dependency entries.
+def export_pylock() -> str:
+    """Run uv export --format pylock.toml and return stdout."""
+    result = subprocess.run(
+        ["uv", "export", "--format", "pylock.toml", "--no-emit-project"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def parse_pylock(toml_str: str) -> list[dict]:
+    """Parse a pylock.toml string and return sorted dependency entries.
 
     Each entry has: packageName, packageVersion, sha256, url.
     """
-    text = lock_path.read_text()
-    data = tomllib.loads(text)
+    data = tomllib.loads(toml_str)
 
     entries = []
-    for pkg in data.get("package", []):
+    for pkg in data.get("packages", []):
         name = pkg.get("name")
         version = pkg.get("version")
         if not name or not version:
             continue
 
-        # Wheels are under [[package.wheels]]
-        for wheel in pkg.get("wheels", []):
+        # Prefer wheels over sdists
+        wheels = pkg.get("wheels", [])
+        if wheels:
+            wheel = wheels[0]
             url = wheel.get("url")
-            hash_str = wheel.get("hash")
-            if not url or not hash_str:
-                continue
-
-            # uv.lock stores hashes as "sha256:<hex>"
-            if hash_str.startswith("sha256:"):
-                sha256 = hash_str[len("sha256:"):]
-            else:
-                continue
-
-            entries.append({
-                "packageName": name,
-                "packageVersion": version,
-                "sha256": sha256,
-                "url": url,
-            })
-            break  # one wheel per package is sufficient
-
-        # Also check sdists if no wheel was found
-        if not any(e["packageName"] == name for e in entries):
-            for sdist in pkg.get("sdists", []):
-                url = sdist.get("url")
-                hash_str = sdist.get("hash")
-                if not url or not hash_str:
-                    continue
-                if hash_str.startswith("sha256:"):
-                    sha256 = hash_str[len("sha256:"):]
-                else:
-                    continue
+            hashes = wheel.get("hashes", {})
+            sha256 = hashes.get("sha256")
+            if url and sha256:
                 entries.append({
                     "packageName": name,
                     "packageVersion": version,
                     "sha256": sha256,
                     "url": url,
                 })
-                break
+                continue
 
-    # Sort alphabetically by package name for deterministic serialization
+        # Fall back to sdist
+        sdist = pkg.get("sdist")
+        if sdist:
+            url = sdist.get("url")
+            hashes = sdist.get("hashes", {})
+            sha256 = hashes.get("sha256")
+            if url and sha256:
+                entries.append({
+                    "packageName": name,
+                    "packageVersion": version,
+                    "sha256": sha256,
+                    "url": url,
+                })
+
     entries.sort(key=lambda e: e["packageName"])
     return entries

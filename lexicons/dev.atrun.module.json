@@ -13,13 +13,9 @@
             "type": "string",
             "format": "datetime"
           },
-          "pythonVersion": {
-            "type": "string",
-            "maxLength": 32
-          },
-          "platform": {
-            "type": "string",
-            "maxLength": 64
+          "ecosystem": {
+            "type": "ref",
+            "ref": "#ecosystem"
           },
           "package": {
             "type": "string",
@@ -31,9 +27,32 @@
             "maxLength": 2048
           },
           "derivedFrom": {
-            "type": "string",
-            "format": "at-uri"
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef"
           }
+        }
+      }
+    },
+    "ecosystem": {
+      "type": "union",
+      "refs": ["#pythonEcosystem", "#nodeEcosystem"]
+    },
+    "pythonEcosystem": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "nodeEcosystem": {
+      "type": "object",
+      "required": ["engine"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "maxLength": 32
         }
       }
     },
@@ -57,9 +76,9 @@
           "type": "string",
           "format": "uri"
         },
-        "hint": {
-          "type": "string",
-          "format": "at-uri"
+        "source": {
+          "type": "ref",
+          "ref": "com.atproto.repo.strongRef"
         }
       }
     }

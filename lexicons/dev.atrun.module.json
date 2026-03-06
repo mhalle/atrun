@@ -1,0 +1,63 @@
+{
+  "lexicon": 1,
+  "id": "dev.atrun.module",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["createdAt", "resolved"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "pythonVersion": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "resolved": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "#depEntry" },
+            "maxLength": 2048
+          },
+          "derivedFrom": {
+            "type": "string",
+            "format": "at-uri"
+          }
+        }
+      }
+    },
+    "depEntry": {
+      "type": "object",
+      "required": ["packageName", "packageVersion", "sha256", "url"],
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "packageVersion": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sha256": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "hint": {
+          "type": "string",
+          "format": "at-uri"
+        }
+      }
+    }
+  }
+}

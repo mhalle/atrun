@@ -14,6 +14,10 @@ atrun is built on **atpub**, a [Lexicon](https://atproto.com/guides/lexicon) (AT
 
 Manifest records live in AT Protocol but aren't strictly part of Bluesky. They're stored in users' personal data repositories alongside — but independent of — their social posts. Bluesky posts can optionally embed a manifest record, linking it to the social graph where it can be commented on, liked, and reposted. This is how `atrun publish --post` works.
 
+In practice, a developer or team would publish releases under a dedicated Bluesky handle (e.g. `@myproject-releases.bsky.social`). Other developers and automated systems could follow that handle to get notified of new releases, the same way they'd follow any other account. Bots could monitor release handles and trigger CI pipelines, update dependency dashboards, or cross-post announcements. The social graph becomes the subscription mechanism — no webhooks, RSS feeds, or polling APIs needed.
+
+Reposting works as a genuine distribution mechanism, not just social signal. When someone reposts a release announcement, the embedded manifest record travels with it — the AT URI and CID are preserved, so anyone who installs from a repost gets the same cryptographically verified record as someone who saw the original. The CID ensures the record hasn't been altered. Reposts become a form of endorsement that carries verifiable provenance.
+
 A `dev.atpub.manifest` record is a **signed manifest**. It doesn't contain code, it points to artifacts hosted elsewhere (GitHub Releases, PyPI, npm, crates.io) and adds:
 
 - **Identity** — every record is tied to a DID (decentralized identifier), so you know who published it
@@ -40,6 +44,11 @@ Today, atrun reads and writes directly to PDS instances. Anyone can publish. No 
 - **Audit supply chains** — trace dependency graphs, detect version conflicts, identify unmaintained packages
 
 Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance — each with its own policies and presentation, all reading the same underlying data.
+
+Future capabilities include:
+
+- **Dependency back-references** — each artifact's `ref` field can point to its own `dev.atpub.manifest` record on AT Protocol, creating a web of linked manifests across publishers. An AppView could traverse these references to build a full dependency graph where every node is a signed, verifiable record.
+- **Repository self-verification** — formalizing the `[tool.atpub]` handle embedded in a project's repository (e.g. in `pyproject.toml` or `package.json`). A tool or AppView could verify that the handle publishing a manifest matches the handle declared in the source repository, providing another layer of authenticity beyond the AT Protocol signature.
 
 ## Install
 
@@ -327,6 +336,23 @@ Or suppress auto-linking:
 
 ```
 atrun publish --dist-url npm:new-package --no-derived-from
+```
+
+## Yanking
+
+If a version needs to be withdrawn (security issue, broken release), you can yank it. Yanking creates a separate `dev.atpub.yank` record that marks the version as withdrawn — the original record stays intact, preserving version chains and CIDs.
+
+```
+atrun yank @alice.bsky.social:cowsay@1.6.0
+atrun yank --reason "security vulnerability" @alice.bsky.social:cowsay@1.6.0
+```
+
+Yanked versions are skipped when resolving `@latest` and marked `[yanked]` in list output. Direct version references still work — yanking is advisory, not destructive.
+
+To restore a yanked version:
+
+```
+atrun unyank @alice.bsky.social:cowsay@1.6.0
 ```
 
 ## Addressing

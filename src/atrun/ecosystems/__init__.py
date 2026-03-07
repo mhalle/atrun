@@ -17,6 +17,14 @@ _ECOSYSTEM_MODULES = {
     "python": ".python",
     "node": ".node",
     "rust": ".rust",
+    "go": ".go",
+}
+
+PACKAGE_TYPES = {
+    "python": "dev.atpub.defs#pythonPackage",
+    "node": "dev.atpub.defs#npmPackage",
+    "rust": "dev.atpub.defs#rustCrate",
+    "go": "dev.atpub.defs#goModule",
 }
 
 
@@ -32,19 +40,20 @@ def get_ecosystem(name: str) -> ModuleType:
     return importlib.import_module(rel, package=__name__)
 
 
-def detect_ecosystem_from_record(record: dict) -> str:
-    """Detect the ecosystem from a record's ecosystem.$type field.
+def detect_ecosystem_from_resolved(resolved: list[dict]) -> str:
+    """Detect the ecosystem from URL patterns in resolved entries.
 
-    Matches the $type against each ecosystem module's ECOSYSTEM_TYPE constant.
-    Falls back to 'python' if no match is found.
+    Checks the first resolved entry's URL against known patterns:
+      - crates.io -> 'rust'
+      - registry.npmjs.org -> 'node'
+      - .whl or files.pythonhosted.org -> 'python'
+
+    Falls back to 'python' if no pattern matches.
     """
-    eco = record.get("ecosystem", {})
-    eco_type = eco.get("$type", "")
-    for name, mod_path in _ECOSYSTEM_MODULES.items():
-        mod = importlib.import_module(mod_path, package=__name__)
-        if eco_type == mod.ECOSYSTEM_TYPE:
-            return name
-    return "python"
+    if not resolved:
+        return "python"
+    url = resolved[0].get("url", "")
+    return detect_ecosystem_from_url(url) or "python"
 
 
 def detect_ecosystem_from_url(url: str) -> str | None:
@@ -62,6 +71,8 @@ def detect_ecosystem_from_url(url: str) -> str | None:
         return "python"
     if "crates.io" in url:
         return "rust"
+    if "proxy.golang.org" in url:
+        return "go"
     return None
 
 
@@ -91,7 +102,11 @@ def detect_ecosystem_from_lockfile(content: str) -> str:
     try:
         data = json.loads(content)
     except Exception:
-        raise SystemExit("Cannot detect ecosystem: lockfile is neither TOML nor JSON.")
+        # Check for go.sum format: lines of "module version h1:hash"
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if lines and all(l.split()[2].startswith("h1:") for l in lines if len(l.split()) == 3):
+            return "go"
+        raise SystemExit("Cannot detect ecosystem: unrecognized lockfile format.")
 
     if "lockfileVersion" in data:
         return "node"
@@ -109,4 +124,6 @@ def detect_ecosystem_from_lockfile_path(path: str) -> str | None:
     """
     if path.endswith("Cargo.lock"):
         return "rust"
+    if path.endswith("go.sum"):
+        return "go"
     return None

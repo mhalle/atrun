@@ -13,7 +13,6 @@ from pathlib import Path
 
 import httpx
 
-ECOSYSTEM_TYPE = "dev.atrun.module#nodeEcosystem"
 LOCKFILE_EXTENSIONS = [".json"]
 
 
@@ -124,8 +123,8 @@ def parse_lockfile(content: str) -> list[dict]:
                         deps.append(f"{dep_name}@{dep_version}")
 
                 entry = {
-                    "packageName": name,
-                    "packageVersion": version,
+                    "name": name,
+                    "version": version,
                     "hash": hash_str,
                     "url": resolved_url,
                 }
@@ -133,7 +132,7 @@ def parse_lockfile(content: str) -> list[dict]:
                     entry["dependencies"] = deps
                 entries.append(entry)
 
-    entries.sort(key=lambda e: e["packageName"])
+    entries.sort(key=lambda e: e["name"])
     return entries
 
 
@@ -146,16 +145,19 @@ def export_lockfile() -> str:
     return lock_path.read_text()
 
 
-def build_ecosystem_value() -> dict:
-    """Return the ecosystem object for an AT Protocol record."""
-    return {"$type": ECOSYSTEM_TYPE, "engine": "node"}
+def build_metadata() -> dict:
+    """Return ecosystem-specific metadata for the manifest.
+
+    Includes the Node.js runtime engine.
+    """
+    return {"engine": "node"}
 
 
 def generate_requirements(resolved: list[dict]) -> str:
     """Format resolved deps as package specs."""
     lines = []
     for entry in resolved:
-        lines.append(f"{entry['packageName']}@{entry['packageVersion']}")
+        lines.append(f"{entry['name']}@{entry['version']}")
     return "\n".join(lines)
 
 
@@ -201,11 +203,11 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     package = record.get("package")
     resolved = record.get("resolved", [])
 
-    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
 
-    version = pkg_entry["packageVersion"]
+    version = pkg_entry["version"]
     return [engine, "install", "-g", f"{package}@{version}"]
 
 
@@ -263,19 +265,19 @@ def _build_pnpm_lockfile(record: dict) -> str:
     package = record["package"]
     resolved = record["resolved"]
 
-    pkg_entry = next(e for e in resolved if e["packageName"] == package)
-    version = pkg_entry["packageVersion"]
+    pkg_entry = next(e for e in resolved if e["name"] == package)
+    version = pkg_entry["version"]
 
     # Build packages section (integrity) and snapshots section (deps)
     packages = {}
     snapshots = {}
 
     for entry in resolved:
-        key = f"{entry['packageName']}@{entry['packageVersion']}"
+        key = f"{entry['name']}@{entry['version']}"
         sri = _hex_to_sri(entry["hash"])
 
         pkg_info: dict = {"resolution": {"integrity": sri}}
-        if entry["packageName"] == package:
+        if entry["name"] == package:
             pkg_info["hasBin"] = True
         packages[key] = pkg_info
 
@@ -327,10 +329,10 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
     package = record.get("package")
     resolved = record.get("resolved", [])
 
-    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
-    version = pkg_entry["packageVersion"]
+    version = pkg_entry["version"]
 
     # Check if record has dependency info for frozen lockfile install
     has_deps = any(e.get("dependencies") for e in resolved)

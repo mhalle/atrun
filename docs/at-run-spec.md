@@ -10,7 +10,7 @@ The result is that a `uv.lock` file, which normally sits quietly in a git repo, 
 
 **Publishing:** You have a Python project. You run `uv lock` and `uv build`. The `atrun publish` command reads the lockfile, extracts each dependency's name, version, hash, and source URL, sorts them deterministically, and writes the list as an AT Protocol record to your Bluesky PDS. Your built wheel is uploaded to GitHub Releases (or PyPI, or anywhere with a URL), and included in the list like any other package.
 
-**Running:** Someone else runs `atrun run at://alice.bsky.social/dev.atrun.module/3jvz2442yt32g`. The tool fetches the record, generates a `requirements.txt` with `--hash` pins for every entry, and hands it to `uv pip install --require-hashes`. UV downloads everything from the specified sources, verifies every hash, installs into a temporary environment, and runs the entry point. The runner never interprets any code — it just reshapes JSON into a format UV already understands.
+**Running:** Someone else runs `atrun run at://alice.bsky.social/dev.atpub.manifest/3jvz2442yt32g`. The tool fetches the record, generates a `requirements.txt` with `--hash` pins for every entry, and hands it to `uv pip install --require-hashes`. UV downloads everything from the specified sources, verifies every hash, installs into a temporary environment, and runs the entry point. The runner never interprets any code — it just reshapes JSON into a format UV already understands.
 
 ## What the Record Looks Like
 
@@ -18,26 +18,26 @@ The record is deliberately minimal. It carries no commentary, no description, no
 
 ```json
 {
-  "$type": "dev.atrun.module",
+  "$type": "dev.atpub.manifest",
   "createdAt": "2026-03-06T12:00:00Z",
   "pythonVersion": "3.12",
   "platform": "linux-x86_64",
   "resolved": [
     {
-      "packageName": "myproject",
-      "packageVersion": "1.0.0",
+      "name": "myproject",
+      "version": "1.0.0",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "url": "https://github.com/alice/myproject/releases/download/v1.0.0/myproject-1.0.0-py3-none-any.whl"
     },
     {
-      "packageName": "anyio",
-      "packageVersion": "4.2.0",
+      "name": "anyio",
+      "version": "4.2.0",
       "sha256": "745db742c8e9f8bcd2aa304e42e3211a02dfc860fbc01ce51adc4d27c27d03d4",
       "url": "https://files.pythonhosted.org/packages/.../anyio-4.2.0-py3-none-any.whl"
     },
     {
-      "packageName": "httpx",
-      "packageVersion": "0.27.0",
+      "name": "httpx",
+      "version": "0.27.0",
       "sha256": "a]0cb88a46f32dc874e04ee956e4c2764aba2aa228f650b06788ba6bda2962ab5",
       "url": "https://files.pythonhosted.org/packages/.../httpx-0.27.0-py3-none-any.whl"
     }
@@ -45,7 +45,7 @@ The record is deliberately minimal. It carries no commentary, no description, no
 }
 ```
 
-The `resolved` array is sorted alphabetically by `packageName` to ensure deterministic serialization. AT Protocol's DAG-CBOR encoding handles everything else for canonical content addressing.
+The `resolved` array is sorted alphabetically by `name` to ensure deterministic serialization. AT Protocol's DAG-CBOR encoding handles everything else for canonical content addressing.
 
 The publisher's own project is just another entry in the list. It is not special. UV discovers entry points from the installed wheel's metadata, so the record does not need to declare them.
 
@@ -119,7 +119,7 @@ Prompts for the user's Bluesky handle and app password. Creates a session via `c
 2. Reads `uv.lock` from the current directory
 3. For each package entry, extracts: name, version, hash, source URL
 4. Sorts entries by package name
-5. Calls `com.atproto.repo.createRecord` with collection `dev.atrun.module`
+5. Calls `com.atproto.repo.createRecord` with collection `dev.atpub.manifest`
 6. Prints the AT URI of the published record
 
 ### `atrun run <at-uri>`
@@ -177,7 +177,7 @@ The specific combination proposed here — publishing lockfiles as signed social
 ```json
 {
   "lexicon": 1,
-  "id": "dev.atrun.module",
+  "id": "dev.atpub.manifest",
   "defs": {
     "main": {
       "type": "record",
@@ -212,13 +212,13 @@ The specific combination proposed here — publishing lockfiles as signed social
     },
     "depEntry": {
       "type": "object",
-      "required": ["packageName", "packageVersion", "sha256", "url"],
+      "required": ["name", "version", "sha256", "url"],
       "properties": {
-        "packageName": {
+        "name": {
           "type": "string",
           "maxLength": 256
         },
-        "packageVersion": {
+        "version": {
           "type": "string",
           "maxLength": 64
         },

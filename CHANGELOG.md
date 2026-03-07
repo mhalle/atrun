@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0
+
+- Separate generic manifest (`dev.atpub.manifest`) from package manager application
+- Rename collection `dev.atrun.module` → `dev.atpub.manifest`, `dev.atrun.yank` → `dev.atpub.yank`
+- Rename `depEntry` fields: `packageName` → `name`, `packageVersion` → `version`
+- Remove `ecosystem` union from manifest — ecosystem is now inferred from URL patterns in resolved entries
+- Remove `build_ecosystem_value()` and `ECOSYSTEM_TYPE` from ecosystem modules
+- Add `detect_ecosystem_from_resolved()` for URL-based ecosystem detection at consume time
+- Add optional `packageType` field with open enum (`dev.atpub.defs#pythonPackage`, `#npmPackage`, `#rustCrate`, `#dataset`, `#document`, `#container`)
+- Add `tool` field for provenance (e.g. `atrun@0.14.0`)
+- Add optional `metadata` object for ecosystem-specific data in camelCase (e.g. `pythonVersion`, `engine`)
+- Add Go module ecosystem support: parse go.sum, install via `go install`, metadata from proxy.golang.org
+- Add `go:` dist URL shorthand (e.g. `go:github.com/junegunn/fzf`, `go:github.com/junegunn/fzf@v0.60.3`)
+- Auto-detect Go from go.sum content or proxy.golang.org URLs
+
 ## 0.13.0
 
 - Add `list` command: `atrun list @handle` shows all packages, `atrun list @handle:package` shows all versions

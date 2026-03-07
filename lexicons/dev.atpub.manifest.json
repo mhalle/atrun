@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "dev.atrun.module",
+  "id": "dev.atpub.manifest",
   "defs": {
     "main": {
       "type": "record",
@@ -12,10 +12,6 @@
           "createdAt": {
             "type": "string",
             "format": "datetime"
-          },
-          "ecosystem": {
-            "type": "ref",
-            "ref": "#ecosystem"
           },
           "package": {
             "type": "string",
@@ -37,6 +33,28 @@
             "type": "string",
             "format": "uri"
           },
+          "packageType": {
+            "type": "string",
+            "description": "Type of package contained in this manifest.",
+            "knownValues": [
+              "dev.atpub.defs#pythonPackage",
+              "dev.atpub.defs#npmPackage",
+              "dev.atpub.defs#rustCrate",
+              "dev.atpub.defs#goModule",
+              "dev.atpub.defs#dataset",
+              "dev.atpub.defs#document",
+              "dev.atpub.defs#container"
+            ]
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool that created this manifest, e.g. 'atrun@0.14.0'.",
+            "maxLength": 128
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Free-form metadata specific to the package type. Keys use camelCase per AT Protocol conventions."
+          },
           "resolved": {
             "type": "array",
             "items": { "type": "ref", "ref": "#depEntry" },
@@ -49,43 +67,15 @@
         }
       }
     },
-    "ecosystem": {
-      "type": "union",
-      "refs": ["#pythonEcosystem", "#nodeEcosystem", "#rustEcosystem"]
-    },
-    "pythonEcosystem": {
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "maxLength": 64
-        }
-      }
-    },
-    "nodeEcosystem": {
-      "type": "object",
-      "required": ["engine"],
-      "properties": {
-        "engine": {
-          "type": "string",
-          "description": "Runtime engine, e.g. 'node' or 'bun'",
-          "maxLength": 32
-        }
-      }
-    },
-    "rustEcosystem": {
-      "type": "object",
-      "properties": {}
-    },
     "depEntry": {
       "type": "object",
-      "required": ["packageName", "packageVersion", "hash", "url"],
+      "required": ["name", "version", "hash", "url"],
       "properties": {
-        "packageName": {
+        "name": {
           "type": "string",
           "maxLength": 256
         },
-        "packageVersion": {
+        "version": {
           "type": "string",
           "maxLength": 64
         },

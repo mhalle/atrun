@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import tomllib
 
-ECOSYSTEM_TYPE = "dev.atrun.module#pythonEcosystem"
 LOCKFILE_EXTENSIONS = [".toml"]
 
 
@@ -34,8 +33,8 @@ def parse_lockfile(content: str) -> list[dict]:
             hash_str = _extract_hash(wheel.get("hashes", {}))
             if url and hash_str:
                 entries.append({
-                    "packageName": name,
-                    "packageVersion": version,
+                    "name": name,
+                    "version": version,
                     "hash": hash_str,
                     "url": url,
                 })
@@ -47,13 +46,13 @@ def parse_lockfile(content: str) -> list[dict]:
             hash_str = _extract_hash(sdist.get("hashes", {}))
             if url and hash_str:
                 entries.append({
-                    "packageName": name,
-                    "packageVersion": version,
+                    "name": name,
+                    "version": version,
                     "hash": hash_str,
                     "url": url,
                 })
 
-    entries.sort(key=lambda e: e["packageName"])
+    entries.sort(key=lambda e: e["name"])
     return entries
 
 
@@ -68,16 +67,20 @@ def export_lockfile() -> str:
     return result.stdout
 
 
-def build_ecosystem_value() -> dict:
-    """Return the ecosystem object for an AT Protocol record."""
-    return {"$type": ECOSYSTEM_TYPE}
+def build_metadata() -> dict:
+    """Return ecosystem-specific metadata for the manifest.
+
+    Includes the Python version used for resolution.
+    """
+    import sys
+    return {"pythonVersion": f"{sys.version_info.major}.{sys.version_info.minor}"}
 
 
 def generate_requirements(resolved: list[dict]) -> str:
     """Generate a requirements.txt with --hash pins from resolved entries."""
     lines = []
     for entry in resolved:
-        name = entry["packageName"]
+        name = entry["name"]
         url = entry["url"]
         hash_str = entry.get("hash", "")
         if ":" not in hash_str:
@@ -90,7 +93,7 @@ def generate_install_args(record: dict) -> list[str]:
     """Build uv tool install command args."""
     package = record.get("package")
     resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
 

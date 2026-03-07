@@ -8,7 +8,7 @@ Package registries like PyPI, npm, and crates.io are centralized services that s
 
 atrun takes a different approach: it uses [AT Protocol](https://atproto.com/) (the protocol behind [Bluesky](https://bsky.app)) as a decentralized package registry. Package records live in users' personal data repositories, the same infrastructure that stores their social posts.
 
-A `dev.atrun.module` record is a **signed manifest** — it doesn't contain code, it points to artifacts hosted elsewhere (GitHub Releases, PyPI, npm, crates.io) and adds:
+A `dev.atpub.manifest` record is a **signed manifest** — a generic, ecosystem-agnostic artifact record. It doesn't contain code, it points to artifacts hosted elsewhere (GitHub Releases, PyPI, npm, crates.io) and adds:
 
 - **Identity** — every record is tied to a DID (decentralized identifier), so you know who published it
 - **Integrity** — every record has a CID (content hash) and dependency hashes for tamper detection
@@ -16,14 +16,14 @@ A `dev.atrun.module` record is a **signed manifest** — it doesn't contain code
 - **Portability** — records aren't locked to one server; users can move between PDS instances
 - **Social distribution** — records can be embedded in Bluesky posts, making package announcements native to the social network
 
-The record is ecosystem-agnostic. The same format works for Python wheels, npm tarballs, and Rust crates. The installer picks the right tool (uv, pnpm, cargo) based on the ecosystem field.
+The manifest format is generic — the same record works for Python wheels, npm tarballs, Rust crates, or any artifact. The ecosystem is inferred from URL patterns in the resolved entries, and the installer picks the right tool (uv, pnpm, cargo) automatically.
 
 ### Architecture
 
 AT Protocol has a layered architecture that maps naturally to package distribution:
 
 - **PDS** (Personal Data Server) — stores your records. This is where atrun publishes today.
-- **AppView** — aggregates and indexes records across all users. A future AppView for `dev.atrun.module` could provide search, discovery, dependency graphs, trust analysis, and supply chain monitoring across the entire network.
+- **AppView** — aggregates and indexes records across all users. A future AppView for `dev.atpub.manifest` could provide search, discovery, dependency graphs, trust analysis, and supply chain monitoring across the entire network.
 
 Anyone can publish. AppViews decide how to present it. Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance.
 
@@ -39,6 +39,7 @@ uv tool install atrun
 - [uv](https://docs.astral.sh/uv/) (for Python ecosystem)
 - [pnpm](https://pnpm.io/), [bun](https://bun.sh/), or [npm](https://www.npmjs.com/) (for Node.js ecosystem)
 - [cargo](https://doc.rust-lang.org/cargo/) (for Rust ecosystem)
+- [go](https://go.dev/) (for Go ecosystem)
 
 Only the tools for ecosystems you use are required.
 
@@ -76,6 +77,8 @@ atrun publish --dist-url npm:cowsay                 # latest npm version
 atrun publish --dist-url npm:cowsay@1.6.0           # specific version
 atrun publish --dist-url crate:ripgrep              # latest crate
 atrun publish --dist-url crate:ripgrep@14.1.1       # specific version
+atrun publish --dist-url go:github.com/junegunn/fzf            # latest Go module
+atrun publish --dist-url go:github.com/junegunn/fzf@v0.60.3    # specific version
 ```
 
 With a Bluesky post:
@@ -118,8 +121,8 @@ atrun install @alice.bsky.social:cowsay@1.6.0
 All URL formats also work:
 
 ```
-atrun install at://did:plc:abc123/dev.atrun.module/3mgxyz
-atrun install 'https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=did:plc:abc123&collection=dev.atrun.module&rkey=3mgxyz'
+atrun install at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+atrun install 'https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=did:plc:abc123&collection=dev.atpub.manifest&rkey=3mgxyz'
 atrun install https://bsky.app/profile/alice.bsky.social/post/3mgxyz
 ```
 
@@ -282,7 +285,7 @@ atrun accepts multiple address formats everywhere a record is referenced:
 |--------|---------|
 | Shorthand | `@alice.bsky.social:cowsay` |
 | Shorthand with version | `@alice.bsky.social:cowsay@1.6.0` |
-| AT URI | `at://did:plc:abc123/dev.atrun.module/3mgxyz` |
+| AT URI | `at://did:plc:abc123/dev.atpub.manifest/3mgxyz` |
 | XRPC URL | `https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=...` |
 | Bluesky post URL | `https://bsky.app/profile/alice.bsky.social/post/3mgxyz` |
 | Plain HTTPS (with `--unsigned`) | `https://example.com/record.json` |
@@ -296,12 +299,13 @@ The `@handle:package` shorthand is the most human-friendly. It resolves to the l
 | Python | `pylock.toml` (via `uv export`) | `.whl` | `uv` | `gh:` |
 | Node.js | `package-lock.json` | `.tgz` | `pnpm`, `bun`, `npm` | `gh:`, `npm:` |
 | Rust | `Cargo.lock` | crate | `cargo` | `gh:`, `crate:` |
+| Go | `go.sum` | module zip | `go` | `go:` |
 
-Ecosystem is auto-detected from the lockfile content or distribution URL. You can override with `--ecosystem python|node|rust`.
+Ecosystem is auto-detected from the lockfile content or distribution URL. You can override with `--ecosystem python|node|rust|go`.
 
 ## Record format
 
-Records use the `dev.atrun.module` [lexicon](lexicons/dev.atrun.module.json). A record contains:
+Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json). A record contains:
 
 | Field | Description |
 |-------|-------------|
@@ -310,8 +314,10 @@ Records use the `dev.atrun.module` [lexicon](lexicons/dev.atrun.module.json). A 
 | `description` | Short description (from artifact metadata) |
 | `license` | License identifier |
 | `url` | Project URL |
-| `ecosystem` | Target ecosystem (`pythonEcosystem`, `nodeEcosystem`, `rustEcosystem`) |
-| `resolved` | Array of dependency entries with `packageName`, `packageVersion`, `hash`, `url` |
+| `packageType` | Open enum: `dev.atpub.defs#pythonPackage`, `#npmPackage`, `#rustCrate`, `#goModule`, `#dataset`, `#document`, `#container` |
+| `tool` | The tool that created this manifest (e.g. `atrun@0.14.0`) |
+| `metadata` | Free-form object for ecosystem-specific data (e.g. `pythonVersion`, `engine`) |
+| `resolved` | Array of dependency entries with `name`, `version`, `hash`, `url` |
 | `derivedFrom` | StrongRef to the previous version (uri + CID) |
 
 Each dependency entry can also have a `dependencies` array (for frozen lockfile verification) and a `source` strongRef pointing to another atrun record.

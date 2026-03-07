@@ -6,7 +6,6 @@ import tomllib
 
 import httpx
 
-ECOSYSTEM_TYPE = "dev.atrun.module#rustEcosystem"
 LOCKFILE_EXTENSIONS = [".lock"]
 
 CRATES_IO_DL = "https://crates.io/api/v1/crates"
@@ -50,8 +49,8 @@ def parse_lockfile(content: str) -> list[dict]:
         seen.add(dedup_key)
 
         entry: dict = {
-            "packageName": name,
-            "packageVersion": version,
+            "name": name,
+            "version": version,
             "hash": f"sha256:{checksum}",
             "url": _crate_download_url(name, version),
         }
@@ -76,7 +75,7 @@ def parse_lockfile(content: str) -> list[dict]:
 
         entries.append(entry)
 
-    entries.sort(key=lambda e: e["packageName"])
+    entries.sort(key=lambda e: e["name"])
     return entries
 
 
@@ -90,16 +89,16 @@ def export_lockfile() -> str:
     return lock_path.read_text()
 
 
-def build_ecosystem_value() -> dict:
-    """Return the ecosystem object for an AT Protocol record."""
-    return {"$type": ECOSYSTEM_TYPE}
+def build_metadata() -> dict:
+    """Return ecosystem-specific metadata for the manifest."""
+    return {}
 
 
 def generate_requirements(resolved: list[dict]) -> str:
     """Format resolved deps as crate specs."""
     lines = []
     for entry in resolved:
-        lines.append(f"{entry['packageName']}@{entry['packageVersion']}")
+        lines.append(f"{entry['name']}@{entry['version']}")
     return "\n".join(lines)
 
 
@@ -112,10 +111,10 @@ def generate_install_args(record: dict) -> list[str]:
     """Build cargo install command args."""
     package = record.get("package")
     resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
-    version = pkg_entry["packageVersion"]
+    version = pkg_entry["version"]
     return ["cargo", "install", f"{package}@{version}"]
 
 

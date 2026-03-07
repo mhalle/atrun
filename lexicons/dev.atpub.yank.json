@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "dev.atrun.yank",
+  "id": "dev.atpub.yank",
   "defs": {
     "main": {
       "type": "record",
@@ -12,7 +12,7 @@
           "subject": {
             "type": "ref",
             "ref": "com.atproto.repo.strongRef",
-            "description": "The dev.atrun.module record being yanked."
+            "description": "The dev.atpub.manifest record being yanked."
           },
           "reason": {
             "type": "string",

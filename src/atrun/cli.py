@@ -6,6 +6,7 @@ packages distributed via AT Protocol records.
 
 import getpass
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +18,7 @@ def cli():
     """Social package distribution on AT Protocol.
 
     Publish, inspect, install, and run packages from AT Protocol records.
-    Supports Python (pip/uv), Node.js (npm/pnpm/bun), and Rust (cargo) ecosystems.
+    Supports Python (pip/uv), Node.js (npm/pnpm/bun), Rust (cargo), and Go ecosystems.
 
     Records can be referenced by AT URI (at://did/collection/rkey) or by
     HTTPS URL (XRPC getRecord endpoint or plain JSON with --unsigned).
@@ -43,7 +44,7 @@ def login(handle: str):
 @click.option("--lockfile", type=click.Path(), help="Path to lockfile, or '-' for stdin. Omit to auto-export via the ecosystem's default tool.")
 @click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file (wheel, tarball) to hash and include.")
 @click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
-@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
+@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust", "go"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
 @click.option("--derived-from", "derived_from", help="AT URI, XRPC URL, or bsky.app URL of the record this derives from. Auto-detected from previous versions if omitted.")
 @click.option("--no-derived-from", is_flag=True, help="Suppress automatic derivedFrom linking to previous versions.")
@@ -54,7 +55,7 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
     (description, license, url) from the dist file, and creates a
-    dev.atrun.module record on the authenticated user's AT Protocol repo.
+    dev.atpub.manifest record on the authenticated user's AT Protocol repo.
 
     Without --lockfile, auto-exports using the ecosystem's default tool
     (uv export for Python). With --dist-url and no --deps, the lockfile
@@ -172,7 +173,7 @@ def list_cmd(target: str, as_json: bool):
 def yank(target: str, reason: str):
     """Yank a published package version.
 
-    Marks a version as withdrawn by creating a dev.atrun.yank record
+    Marks a version as withdrawn by creating a dev.atpub.yank record
     that references the original. The original record stays intact —
     version chains and CIDs are preserved.
 
@@ -204,7 +205,7 @@ def yank(target: str, reason: str):
         raise click.ClickException(f"Cannot yank: record belongs to {at_info.get('handle', at_info['did'])}, not you.")
 
     yank_record = {
-        "$type": "dev.atrun.yank",
+        "$type": "dev.atpub.yank",
         "subject": {"uri": at_info["uri"], "cid": at_info["cid"]},
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
@@ -217,7 +218,7 @@ def yank(target: str, reason: str):
         headers={"Authorization": f"Bearer {session['accessJwt']}"},
         json={
             "repo": did,
-            "collection": "dev.atrun.yank",
+            "collection": "dev.atpub.yank",
             "record": yank_record,
         },
     )
@@ -229,7 +230,7 @@ def yank(target: str, reason: str):
             headers={"Authorization": f"Bearer {session['accessJwt']}"},
             json={
                 "repo": did,
-                "collection": "dev.atrun.yank",
+                "collection": "dev.atpub.yank",
                 "record": yank_record,
             },
         )
@@ -249,7 +250,7 @@ def yank(target: str, reason: str):
 def unyank(target: str):
     """Remove a yank from a published package version.
 
-    Deletes the dev.atrun.yank record, restoring the version to
+    Deletes the dev.atpub.yank record, restoring the version to
     normal status.
 
     TARGET is @handle:package@version or an AT URI.
@@ -276,7 +277,7 @@ def unyank(target: str):
     resp = httpx.get(
         "https://bsky.social/xrpc/com.atproto.repo.listRecords",
         headers={"Authorization": f"Bearer {session['accessJwt']}"},
-        params={"repo": did, "collection": "dev.atrun.yank", "limit": 100},
+        params={"repo": did, "collection": "dev.atpub.yank", "limit": 100},
     )
     if resp.status_code != 200:
         raise click.ClickException("Failed to list yank records.")
@@ -302,7 +303,7 @@ def unyank(target: str):
         headers={"Authorization": f"Bearer {session['accessJwt']}"},
         json={
             "repo": did,
-            "collection": "dev.atrun.yank",
+            "collection": "dev.atpub.yank",
             "rkey": rkey,
         },
     )
@@ -314,7 +315,7 @@ def unyank(target: str):
             headers={"Authorization": f"Bearer {session['accessJwt']}"},
             json={
                 "repo": did,
-                "collection": "dev.atrun.yank",
+                "collection": "dev.atpub.yank",
                 "rkey": rkey,
             },
         )
@@ -339,8 +340,8 @@ def resolve(uri: str, unsigned: bool):
 
     \b
     Examples:
-      atrun resolve at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun resolve 'https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=did:plc:abc123&collection=dev.atrun.module&rkey=3mgxyz'
+      atrun resolve at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun resolve 'https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=did:plc:abc123&collection=dev.atpub.manifest&rkey=3mgxyz'
     """
     from .run import fetch_record, generate_requirements
 
@@ -380,12 +381,12 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     \b
     Examples:
-      atrun info at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun info --json at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun info --social at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun info --registry at://did:plc:abc123/dev.atrun.module/3mgxyz
+      atrun info at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun info --json at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun info --social at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun info --registry at://did:plc:abc123/dev.atpub.manifest/3mgxyz
     """
-    from .ecosystems import detect_ecosystem_from_record, get_ecosystem
+    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
     from .run import fetch_record, fetch_yanks
 
     result = fetch_record(uri, unsigned=unsigned)
@@ -463,7 +464,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     if show_dist:
         resolved = record.get("resolved", [])
-        pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in resolved list.")
         click.echo(pkg_entry["url"])
@@ -472,11 +473,11 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     if registry:
         # Fetch full metadata from ecosystem registry
         resolved = record.get("resolved", [])
-        pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in resolved list.")
 
-        eco_name = detect_ecosystem_from_record(record)
+        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []))
         eco_mod = get_ecosystem(eco_name)
         metadata = eco_mod.fetch_metadata(pkg_entry["url"])
 
@@ -512,18 +513,17 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         if field in record:
             content[field] = record[field]
 
-    eco = record.get("ecosystem", {})
-    eco_type = eco.get("$type", "")
-    if "python" in eco_type:
-        content["ecosystem"] = "python"
-    elif "node" in eco_type:
-        content["ecosystem"] = "node"
-    elif "rust" in eco_type:
-        content["ecosystem"] = "rust"
+    resolved = record.get("resolved", [])
+
+    if "packageType" in record:
+        content["packageType"] = record["packageType"]
+    if "tool" in record:
+        content["tool"] = record["tool"]
+    if "metadata" in record:
+        content["metadata"] = record["metadata"]
 
     # Include hash of the main package
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
     if pkg_entry and "hash" in pkg_entry:
         content["hash"] = pkg_entry["hash"]
 
@@ -557,8 +557,8 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     click.echo(f"package: {content['package']}")
     if "version" in content:
         click.echo(f"version: {content['version']}")
-    if "ecosystem" in content:
-        click.echo(f"ecosystem: {content['ecosystem']}")
+    if "packageType" in content:
+        click.echo(f"packageType: {content['packageType']}")
 
     if yank_reason is not None:
         reason_str = f": {yank_reason}" if yank_reason else ""
@@ -576,9 +576,11 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     if "hash" in content:
         click.echo(f"hash: {content['hash']}")
     click.echo(f"dependencies: {content['dependencies']}")
+    if "tool" in content:
+        click.echo(f"tool: {content['tool']}")
 
     # Any remaining content fields not yet printed
-    shown = {"package", "version", "ecosystem", "description", "license", "url", "hash", "dependencies", "derivedFrom"}
+    shown = {"package", "version", "packageType", "tool", "metadata", "description", "license", "url", "hash", "dependencies", "derivedFrom"}
     for key, value in content.items():
         if key not in shown:
             click.echo(f"{key}: {value}")
@@ -628,15 +630,81 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
                 click.echo(f"  @{reply['handle']}: {reply['text']}")
 
 
+@cli.command()
+@click.argument("target")
+@click.option("--json", "as_json", is_flag=True, help="Output as structured JSON.")
+@click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
+def verify(target: str, as_json: bool, unsigned: bool):
+    """Verify a record's artifact hash without installing.
+
+    Downloads the main package artifact, computes its SHA-256 hash,
+    and compares it to the hash stored in the record.
+
+    TARGET is @handle:package[@version] or an AT URI.
+
+    \b
+    Examples:
+      atrun verify @alice.bsky.social:cowsay
+      atrun verify --json @alice.bsky.social:cowsay@1.6.0
+      atrun verify at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+    """
+    from .run import fetch_record
+    from .verify import HashMismatchError, verify_artifact
+
+    result = fetch_record(target, unsigned=unsigned)
+    record = result["content"]
+    package = record.get("package")
+    if not package:
+        raise click.ClickException("Record has no 'package' field.")
+
+    resolved = record.get("resolved", [])
+    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    if not pkg_entry:
+        raise click.ClickException(f"Package '{package}' not found in resolved list.")
+
+    pkg_hash = pkg_entry.get("hash", "")
+    if not pkg_hash:
+        raise click.ClickException(f"Package '{package}' has no hash in the record.")
+
+    url = pkg_entry["url"]
+    click.echo(f"Verifying {package} from {url}...", err=True)
+
+    try:
+        verify_artifact(url, pkg_hash)
+    except HashMismatchError as exc:
+        if as_json:
+            click.echo(json.dumps({
+                "verified": False,
+                "package": package,
+                "url": url,
+                "expected": exc.expected,
+                "actual": exc.actual,
+            }, indent=2))
+        else:
+            click.echo(f"FAILED: {exc}", err=True)
+        raise SystemExit(1)
+
+    if as_json:
+        click.echo(json.dumps({
+            "verified": True,
+            "package": package,
+            "url": url,
+            "hash": pkg_hash,
+        }, indent=2))
+    else:
+        click.echo(f"Verified: {pkg_hash}")
+
+
 @cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("uri")
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.option("--deps", is_flag=True, help="Force frozen lockfile verification using the record's dependency graph. Errors if the record has no dependency data.")
 @click.option("--no-deps", is_flag=True, help="Skip frozen lockfile verification even if the record has dependency data. Installs using the package manager's default resolution.")
+@click.option("--verify/--no-verify", "do_verify", default=True, help="Verify the main package artifact hash before installing (default: --verify).")
 @click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
 @click.option("--dry-run", "install_dry_run", is_flag=True, help="Print the install command without executing it.")
-def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
+def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do_verify: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
     """Install a package from an AT Protocol record.
 
     Fetches the record, detects the ecosystem, and installs the package
@@ -653,10 +721,10 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
 
     \b
     Examples:
-      atrun install at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun install --deps at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun install --no-deps at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun install at://did:plc:abc123/dev.atrun.module/3mgxyz -- --force
+      atrun install at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun install --deps at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun install --no-deps at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun install at://did:plc:abc123/dev.atpub.manifest/3mgxyz -- --force
     """
     import shlex
     import subprocess
@@ -665,7 +733,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
     if deps and no_deps:
         raise click.ClickException("Cannot use both --deps and --no-deps.")
 
-    from .ecosystems import detect_ecosystem_from_record, get_ecosystem
+    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
     from .run import fetch_record, fetch_yanks, generate_requirements
 
     result = fetch_record(uri, unsigned=unsigned)
@@ -686,7 +754,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
             reason_str = f": {reason}" if reason else ""
             raise click.ClickException(f"This version has been yanked{reason_str}. Use a different version or install via the dist URL directly.")
 
-    eco_name = detect_ecosystem_from_record(record)
+    eco_name = detect_ecosystem_from_resolved(resolved)
     eco_mod = get_ecosystem(eco_name)
 
     version = record.get("version", "")
@@ -694,7 +762,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
 
     if eco_name == "python":
         # Python: use uv tool install with requirements file
-        pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in resolved list.")
 
@@ -704,25 +772,66 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
             f.write(requirements)
             req_path = f.name
 
-        cmd = [
-            "uv", "tool", "install",
-            f"{package} @ {pkg_entry['url']}",
-            "--with-requirements", req_path,
-            *extra_args,
-        ]
+        # Download and verify main package hash, then use file:// URL
+        verified_path = None
+        pkg_url = pkg_entry["url"]
+        pkg_hash = pkg_entry.get("hash", "")
 
-        if install_dry_run:
-            click.echo(shlex.join(cmd))
-            return
+        if do_verify and pkg_hash:
+            from .verify import HashMismatchError, download_and_verify
 
-        subprocess.run(cmd, check=True)
-    elif eco_name == "rust":
-        # Rust: cargo install
+            click.echo(f"Verifying {package}...", err=True)
+            try:
+                verified_path = download_and_verify(pkg_url, pkg_hash)
+            except HashMismatchError as exc:
+                raise click.ClickException(str(exc))
+            pkg_url = f"file://{verified_path}"
+            click.echo("Hash verified.", err=True)
+        elif do_verify and not pkg_hash:
+            click.echo(f"Warning: no hash in record for {package}, skipping verification.", err=True)
+
+        try:
+            cmd = [
+                "uv", "tool", "install",
+                f"{package} @ {pkg_url}",
+                "--with-requirements", req_path,
+                *extra_args,
+            ]
+
+            if install_dry_run:
+                click.echo(shlex.join(cmd))
+                return
+
+            subprocess.run(cmd, check=True)
+        finally:
+            if verified_path:
+                verified_path.unlink(missing_ok=True)
+    elif eco_name in ("rust", "go"):
+        # Rust: verify artifact hash before cargo install (Go: skip, h1: tree hashes)
+        if eco_name == "rust" and do_verify:
+            pkg_entry = next((e for e in resolved if e["name"] == package), None)
+            pkg_hash = pkg_entry.get("hash", "") if pkg_entry else ""
+            if pkg_hash:
+                from .verify import HashMismatchError, verify_artifact
+
+                click.echo(f"Verifying {package}...", err=True)
+                try:
+                    verify_artifact(pkg_entry["url"], pkg_hash)
+                except HashMismatchError as exc:
+                    raise click.ClickException(str(exc))
+                click.echo("Hash verified.", err=True)
+            elif pkg_entry:
+                click.echo(f"Warning: no hash in record for {package}, skipping verification.", err=True)
+
+        # Rust/Go: cargo install / go install
         cmd = eco_mod.generate_install_args(record) + list(extra_args)
         if install_dry_run:
             click.echo(shlex.join(cmd))
             return
-        subprocess.run(cmd, check=True)
+        env = None
+        if eco_name == "go":
+            env = {**os.environ, "GO111MODULE": "on"}
+        subprocess.run(cmd, check=True, env=env)
     else:
         # Node: determine whether to use verified install
         has_dep_info = any(e.get("dependencies") for e in resolved)
@@ -752,23 +861,24 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
 
 @cli.command()
 @click.argument("uri")
+@click.option("--verify/--no-verify", "do_verify", default=True, help="Verify the main package artifact hash before running (default: --verify).")
 @click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def run(uri: str, engine: str | None, unsigned: bool):
+def run(uri: str, do_verify: bool, engine: str | None, unsigned: bool):
     """Run a package directly from an AT Protocol record.
 
     Fetches the record, installs dependencies into a temporary environment,
     and executes the package. The temporary environment is cleaned up after
     the command exits.
 
-    For Python, creates an isolated venv with hash-verified dependencies.
+    For Python, downloads and verifies the artifact hash, then runs via uvx.
     For Node, uses the ecosystem's native run mechanism.
 
     \b
     Examples:
-      atrun run at://did:plc:abc123/dev.atrun.module/3mgxyz
-      atrun run --engine bun at://did:plc:abc123/dev.atrun.module/3mgxyz
+      atrun run at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun run --engine bun at://did:plc:abc123/dev.atpub.manifest/3mgxyz
     """
     from .run import run_module
 
-    run_module(uri, unsigned=unsigned, engine=engine)
+    run_module(uri, unsigned=unsigned, engine=engine, do_verify=do_verify)

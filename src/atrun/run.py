@@ -7,9 +7,6 @@ and ecosystem-dispatched execution.
 from __future__ import annotations
 
 import re
-import subprocess
-import tempfile
-from pathlib import Path
 
 import httpx
 
@@ -18,7 +15,7 @@ BSKY_POST_RE = re.compile(r"^https://bsky\.app/profile/([^/]+)/post/([^/]+)$")
 # @handle:package or @handle:package@version (version can be "latest")
 SHORTHAND_RE = re.compile(r"^@([^:]+):([^@]+)(?:@(.+))?$")
 
-YANK_COLLECTION = "dev.atrun.yank"
+YANK_COLLECTION = "dev.atpub.yank"
 
 
 def resolve_pds_url(handle_or_did: str) -> tuple[str, str]:
@@ -82,7 +79,7 @@ def _resolve_handle(did: str) -> str | None:
 def _fetch_from_bsky_post(handle: str, rkey: str) -> dict:
     """Fetch an atrun record embedded in a Bluesky post.
 
-    Resolves the post, then looks for a dev.atrun.module reference in:
+    Resolves the post, then looks for a dev.atpub.manifest reference in:
       1. embed.external.uri (link card pointing to XRPC getRecord URL)
       2. embed.record.uri (direct record embed)
       3. facets with link features pointing to XRPC getRecord URLs
@@ -104,11 +101,11 @@ def _fetch_from_bsky_post(handle: str, rkey: str) -> dict:
 
     if embed_type == "app.bsky.embed.external":
         uri = embed.get("external", {}).get("uri", "")
-        if "dev.atrun.module" in uri:
+        if "dev.atpub.manifest" in uri:
             record_url = uri
     elif embed_type == "app.bsky.embed.record":
         uri = embed.get("record", {}).get("uri", "")
-        if "dev.atrun.module" in uri:
+        if "dev.atpub.manifest" in uri:
             record_url = uri
 
     if not record_url:
@@ -116,21 +113,21 @@ def _fetch_from_bsky_post(handle: str, rkey: str) -> dict:
         for facet in post.get("facets", []):
             for feature in facet.get("features", []):
                 uri = feature.get("uri", "")
-                if "dev.atrun.module" in uri:
+                if "dev.atpub.manifest" in uri:
                     record_url = uri
                     break
             if record_url:
                 break
 
     if not record_url:
-        raise SystemExit("Post does not contain a dev.atrun.module record reference.")
+        raise SystemExit("Post does not contain a dev.atpub.manifest record reference.")
 
     # Follow the URI — could be an at:// URI or an XRPC HTTPS URL
     return fetch_record(record_url)
 
 
 def list_records(handle: str, package: str | None = None) -> list[dict]:
-    """List dev.atrun.module records for a user.
+    """List dev.atpub.manifest records for a user.
 
     Returns a list of dicts with uri, package, version, ecosystem, and
     timestamp fields. If package is specified, filters to that package only.
@@ -140,7 +137,7 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
 
     resp = httpx.get(
         f"{pds_url}/xrpc/com.atproto.repo.listRecords",
-        params={"repo": did, "collection": "dev.atrun.module", "limit": 100, "reverse": False},
+        params={"repo": did, "collection": "dev.atpub.manifest", "limit": 100, "reverse": False},
     )
     resp.raise_for_status()
 
@@ -157,23 +154,19 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
         if m:
             ts = _decode_tid_timestamp(m.group(3))
 
-        eco = value.get("ecosystem", {})
-        eco_type = eco.get("$type", "")
-        eco_name = ""
-        if "python" in eco_type:
-            eco_name = "python"
-        elif "node" in eco_type:
-            eco_name = "node"
-        elif "rust" in eco_type:
-            eco_name = "rust"
+        from .ecosystems import detect_ecosystem_from_resolved
+        eco_name = detect_ecosystem_from_resolved(value.get("resolved", []))
 
-        results.append({
+        entry = {
             "uri": rec["uri"],
             "package": pkg,
             "version": value.get("version", ""),
             "ecosystem": eco_name,
             "timestamp": ts,
-        })
+        }
+        if "packageType" in value:
+            entry["packageType"] = value["packageType"]
+        results.append(entry)
 
     return results
 
@@ -205,7 +198,7 @@ def fetch_yanks(handle_or_did: str) -> dict[str, str]:
 def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
     """Resolve @handle:package[@version] to a record.
 
-    Lists the user's dev.atrun.module records and finds the one matching
+    Lists the user's dev.atpub.manifest records and finds the one matching
     the package name. If version is None or 'latest', returns the most
     recent non-yanked version. Otherwise matches the exact version
     (even if yanked).
@@ -214,7 +207,7 @@ def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
 
     resp = httpx.get(
         f"{pds_url}/xrpc/com.atproto.repo.listRecords",
-        params={"repo": did, "collection": "dev.atrun.module", "limit": 100, "reverse": False},
+        params={"repo": did, "collection": "dev.atpub.manifest", "limit": 100, "reverse": False},
     )
     resp.raise_for_status()
 
@@ -255,7 +248,7 @@ def fetch_record(uri: str, unsigned: bool = False) -> dict:
       - handle: the publisher's human-readable handle
       - timestamp: creation time decoded from the TID
 
-    The 'content' key contains the record value (the dev.atrun.module data).
+    The 'content' key contains the record value (the dev.atpub.manifest data).
 
     For unsigned HTTPS URLs, 'at' is None.
     """
@@ -442,15 +435,15 @@ def generate_requirements(resolved: list[dict], record: dict | None = None) -> s
     Otherwise falls back to Python requirements.txt with hash pins.
     """
     if record is not None:
-        from .ecosystems import detect_ecosystem_from_record, get_ecosystem
-        eco_name = detect_ecosystem_from_record(record)
+        from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
+        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []))
         eco_mod = get_ecosystem(eco_name)
         return eco_mod.format_resolve_output(resolved)
 
     # Legacy fallback: Python requirements.txt format
     lines = []
     for entry in resolved:
-        name = entry["packageName"]
+        name = entry["name"]
         url = entry["url"]
         hash_str = entry.get("hash", entry.get("sha256", ""))
         if ":" not in hash_str:
@@ -459,16 +452,18 @@ def generate_requirements(resolved: list[dict], record: dict | None = None) -> s
     return "\n".join(lines)
 
 
-def run_module(uri: str, unsigned: bool = False, engine: str | None = None) -> None:
+def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_verify: bool = True) -> None:
     """Fetch a record and run the package in a temporary environment.
 
-    For Python, creates an isolated venv, installs dependencies with hash
-    verification, and executes the package.
+    For Python, downloads and verifies the main artifact hash, then
+    runs via uvx with the verified local file.
 
     For Node, delegates to the ecosystem's native run command.
     The engine parameter selects the Node.js package manager (pnpm, bun, npm).
     """
-    from .ecosystems import detect_ecosystem_from_record, get_ecosystem
+    import sys
+
+    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
 
     record = fetch_record(uri, unsigned=unsigned)["content"]
     resolved = record.get("resolved", [])
@@ -479,45 +474,39 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None) -> N
     if not package:
         raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
-    eco_name = detect_ecosystem_from_record(record)
+    eco_name = detect_ecosystem_from_resolved(resolved)
     eco_mod = get_ecosystem(eco_name)
 
+    import os
+
     if eco_name == "python":
-        requirements = eco_mod.generate_requirements(resolved)
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        if not pkg_entry:
+            raise SystemExit(f"Package '{package}' not found in resolved list.")
 
-        with tempfile.TemporaryDirectory(prefix="atrun-") as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            req_file = tmpdir_path / "requirements.txt"
-            req_file.write_text(requirements)
+        pkg_url = pkg_entry["url"]
+        pkg_hash = pkg_entry.get("hash", "")
 
-            venv_path = tmpdir_path / ".venv"
+        if do_verify and pkg_hash:
+            from .verify import HashMismatchError, download_and_verify
 
-            subprocess.run(
-                ["uv", "venv", str(venv_path)],
-                check=True,
-            )
+            print(f"Verifying {package}...", file=sys.stderr)
+            try:
+                verified_path = download_and_verify(pkg_url, pkg_hash)
+            except HashMismatchError as exc:
+                raise SystemExit(str(exc))
+            pkg_url = f"file://{verified_path}"
+            print("Hash verified.", file=sys.stderr)
+        elif do_verify and not pkg_hash:
+            print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
 
-            subprocess.run(
-                [
-                    "uv", "pip", "install",
-                    "--require-hashes",
-                    "--python", str(venv_path / "bin" / "python"),
-                    "-r", str(req_file),
-                ],
-                check=True,
-            )
-
-            subprocess.run(
-                [
-                    "uv", "run",
-                    "--python", str(venv_path / "bin" / "python"),
-                    package,
-                ],
-                check=True,
-            )
+        cmd = ["uvx", "--from", f"{package} @ {pkg_url}", package]
+        os.execvp(cmd[0], cmd)
     else:
         engine_kwargs = {}
         if engine and eco_name == "node":
             engine_kwargs["engine"] = engine
         cmd = eco_mod.generate_run_args(record, **engine_kwargs)
-        subprocess.run(cmd, check=True)
+        if eco_name == "go":
+            os.environ["GO111MODULE"] = "on"
+        os.execvp(cmd[0], cmd)

@@ -6,16 +6,16 @@ metadata extraction, and record creation via XRPC.
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 
 from .auth import load_session, refresh_session
-from .ecosystems import detect_ecosystem_from_lockfile, detect_ecosystem_from_url, get_ecosystem
+from .ecosystems import PACKAGE_TYPES, detect_ecosystem_from_lockfile, detect_ecosystem_from_url, get_ecosystem
+from .verify import hash_bytes as _hash_bytes, hash_file as _hash_file
 
-COLLECTION = "dev.atrun.module"
+COLLECTION = "dev.atpub.manifest"
 
 
 def _resolve_npm_shorthand(spec: str) -> str:
@@ -74,6 +74,32 @@ def _resolve_crate_shorthand(spec: str) -> str:
     return f"https://crates.io/api/v1/crates/{name}/{version}/download"
 
 
+def _resolve_go_shorthand(spec: str) -> str:
+    """Resolve go:module or go:module@version to a proxy.golang.org URL.
+
+    Without @version, fetches the latest version from the Go module proxy.
+    """
+    import re
+
+    module = spec.removeprefix("go:")
+    if "@" in module:
+        module, version = module.rsplit("@", 1)
+    else:
+        version = None
+
+    # Escape uppercase letters for proxy URL
+    escaped = re.sub(r"[A-Z]", lambda m: f"!{m.group().lower()}", module)
+
+    if version is None:
+        resp = httpx.get(f"https://proxy.golang.org/{escaped}/@latest")
+        resp.raise_for_status()
+        data = resp.json()
+        version = data.get("Version")
+        if not version:
+            raise SystemExit(f"Cannot determine latest version of {module}")
+
+    return f"https://proxy.golang.org/{escaped}/@v/{version}.zip"
+
 
 def _resolve_github_shorthand(spec: str) -> str:
     """Resolve gh:owner/repo or gh:owner/repo@tag to a release asset URL.
@@ -105,19 +131,6 @@ def _resolve_github_shorthand(spec: str) -> str:
 
     raise SystemExit(f"No assets found in latest release of {repo}")
 
-
-def _hash_bytes(data: bytes) -> str:
-    """Return the SHA-256 hex digest of raw bytes."""
-    return hashlib.sha256(data).hexdigest()
-
-
-def _hash_file(path: Path) -> str:
-    """Return the SHA-256 hex digest of a file, read in chunks."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
@@ -154,6 +167,14 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
         m = re.search(r"/crates/([^/]+)/([^/]+)/download", url)
         if m:
             return m.group(1), m.group(2)
+    # proxy.golang.org: /{module}/@v/{version}.zip
+    if "proxy.golang.org" in url:
+        import re
+        m = re.search(r"proxy\.golang\.org/(.+)/@v/(.+)\.zip", url)
+        if m:
+            # Unescape module path (!x -> X)
+            module = re.sub(r"!([a-z])", lambda m: m.group(1).upper(), m.group(1))
+            return module, m.group(2)
     filename = url.rsplit("/", 1)[-1]
     return _name_version_from_dist_filename(filename)
 
@@ -202,7 +223,7 @@ def build_record(
     strip_deps: bool = False,
     derived_from: str | None = None,
 ) -> dict:
-    """Build a dev.atrun.module record without publishing it.
+    """Build a dev.atpub.manifest record without publishing it.
 
     Args:
         lockfile: Lockfile content as a string. If None, auto-exports
@@ -230,6 +251,8 @@ def build_record(
         dist_url = _resolve_npm_shorthand(dist_url)
     elif dist_url and dist_url.startswith("crate:"):
         dist_url = _resolve_crate_shorthand(dist_url)
+    elif dist_url and dist_url.startswith("go:"):
+        dist_url = _resolve_go_shorthand(dist_url)
 
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:
@@ -258,15 +281,15 @@ def build_record(
     if dist_info:
         name, version, sha256 = dist_info
         package_name = name
-        existing = next((e for e in entries if e["packageName"] == name and e["packageVersion"] == version), None)
+        existing = next((e for e in entries if e["name"] == name and e["version"] == version), None)
         if existing is None:
             entries.append({
-                "packageName": name,
-                "packageVersion": version,
+                "name": name,
+                "version": version,
                 "hash": f"sha256:{sha256}",
                 "url": dist_url,
             })
-            entries.sort(key=lambda e: e["packageName"])
+            entries.sort(key=lambda e: e["name"])
 
     if strip_deps:
         entries = [{k: v for k, v in e.items() if k != "dependencies"} for e in entries]
@@ -285,17 +308,34 @@ def build_record(
     record: dict = {
         "$type": COLLECTION,
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "ecosystem": eco_mod.build_ecosystem_value(),
         "resolved": entries,
     }
     if package_name:
         record["package"] = package_name
-        pkg_entry = next((e for e in entries if e["packageName"] == package_name), None)
+        pkg_entry = next((e for e in entries if e["name"] == package_name), None)
         if pkg_entry:
-            record["version"] = pkg_entry["packageVersion"]
+            record["version"] = pkg_entry["version"]
     for field in ("description", "license", "url"):
         if field in dist_meta:
             record[field] = dist_meta[field]
+
+    # packageType from ecosystem
+    package_type = PACKAGE_TYPES.get(ecosystem)
+    if package_type:
+        record["packageType"] = package_type
+
+    # tool identifier
+    from importlib.metadata import version as pkg_version
+    try:
+        record["tool"] = f"atrun@{pkg_version('atrun')}"
+    except Exception:
+        record["tool"] = "atrun"
+
+    # Ecosystem-specific metadata
+    if hasattr(eco_mod, "build_metadata"):
+        meta = eco_mod.build_metadata()
+        if meta:
+            record["metadata"] = meta
 
     if derived_from:
         from .run import fetch_record
@@ -329,7 +369,7 @@ def publish(
     (package name, version, description) for the card content.
 
     Returns the AT URI of the created record
-    (e.g. at://did:plc:abc123/dev.atrun.module/3mgxyz).
+    (e.g. at://did:plc:abc123/dev.atpub.manifest/3mgxyz).
     """
     record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps, derived_from=derived_from)
 

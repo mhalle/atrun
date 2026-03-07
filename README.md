@@ -18,7 +18,7 @@ A `dev.atpub.manifest` record is a **signed manifest** — a generic, ecosystem-
 - **Portability** — records aren't locked to one server; users can move between PDS instances
 - **Social distribution** — records can be embedded in Bluesky posts, making package announcements native to the social network
 
-The manifest format is generic — the same record works for Python wheels, npm tarballs, Rust crates, or any artifact. The ecosystem is inferred from URL patterns in the resolved entries, and the installer picks the right tool (uv, pnpm, cargo) automatically.
+The manifest format is generic — the same record works for Python wheels, npm tarballs, Rust crates, container images, or any artifact. The ecosystem is inferred from URL patterns in the artifact entries, and the installer picks the right tool (uv, pnpm, cargo, docker) automatically.
 
 ### Architecture
 
@@ -183,7 +183,7 @@ ecosystem: rust
 description: ripgrep is a line-oriented search tool...
 license: Unlicense OR MIT
 url: https://github.com/BurntSushi/ripgrep
-hash: sha256:f388c4955f85477c28a8667355819844a06614b083c23517f0e86bd1d6d82b73
+digest: sha256:f388c4955f85477c28a8667355819844a06614b083c23517f0e86bd1d6d82b73
 dependencies: 1
 
 publisher: alice.bsky.social (did:plc:abc123)
@@ -302,8 +302,9 @@ The `@handle:package` shorthand is the most human-friendly. It resolves to the l
 | Node.js | `package-lock.json` | `.tgz` | `pnpm`, `bun`, `npm` | `gh:`, `npm:` |
 | Rust | `Cargo.lock` | crate | `cargo` | `gh:`, `crate:` |
 | Go | `go.sum` | module zip | `go` | `go:` |
+| Container | `compose.yml`, `.images` | OCI image | `docker`, `crane` | `docker:` |
 
-Ecosystem is auto-detected from the lockfile content or distribution URL. You can override with `--ecosystem python|node|rust|go`.
+Ecosystem is auto-detected from the lockfile content or distribution URL. You can override with `--ecosystem python|node|rust|go|container`.
 
 ## Record format
 
@@ -317,12 +318,12 @@ Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json)
 | `license` | License identifier |
 | `url` | Project URL |
 | `packageType` | Open enum: `dev.atpub.defs#pythonPackage`, `#npmPackage`, `#rustCrate`, `#goModule`, `#dataset`, `#document`, `#container` |
-| `tool` | The tool that created this manifest (e.g. `atrun@0.14.0`) |
+| `tool` | The tool that created this manifest (e.g. `atrun@0.14.3`) |
 | `metadata` | Free-form object for ecosystem-specific data (e.g. `pythonVersion`, `engine`) |
-| `resolved` | Array of dependency entries with `name`, `version`, `hash`, `url` |
-| `derivedFrom` | StrongRef to the previous version (uri + CID) |
+| `artifacts` | Array of artifact entries (see below) |
+| `derivedFrom` | StrongRef(s) to records this derives from (uri + CID) |
 
-Each dependency entry can also have a `dependencies` array (for frozen lockfile verification) and a `source` strongRef pointing to another atrun record.
+Each artifact entry has optional fields: `id`, `name`, `version`, `digest`, `url`, `artifactType`, `dependencies`, `metadata`, and `ref` (a strongRef to the artifact's own manifest record).
 
 ## License
 

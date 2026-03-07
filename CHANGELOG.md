@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.4
+
+- Fix crash in `info` command: `content['hash']` → `content['digest']` (KeyError on any record with a digest)
+- Remove dead code: unused `lockfile.py` wrapper, unreachable node branch in `run_module`, stale `rstrip` in rust metadata
+- Clean up duplicate imports in node ecosystem module
+- Update `get_ecosystem` docstring to list all supported ecosystems
+- README: add comparison section, expand AppView possibilities, clarify AT Protocol vs Bluesky relationship, install prerequisites, authentication scope
+
 ## 0.14.3
 
 - Add `--version` flag to CLI

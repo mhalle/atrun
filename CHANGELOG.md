@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+- Add `version`, `description`, `license`, and `url` metadata fields to lexicon
+- Extract metadata from dist artifacts at publish time (wheel METADATA, npm package.json, JSR meta.json)
+- Support `License-Expression` field (PEP 639) in wheel metadata
+- Local dist file metadata extraction (no network fetch needed when `--dist-file` is provided)
+- Hash verification between local `--dist-file` and remote `--dist-url` when both are given
+- Lockfile is optional when publishing with `--dist-url` and no `--deps`
+- Add `--post` flag to publish: creates a Bluesky post with a link card embedding the record
+- Accept Bluesky post URLs (`https://bsky.app/profile/.../post/...`) in all commands
+- Accept XRPC HTTPS URLs in all commands (alongside AT URIs)
+- Add `--unsigned` flag for plain HTTPS URLs without AT Protocol verification
+- `info` command shows AT Protocol envelope (publisher, CID, timestamp) alongside content
+- `info --json` returns structured output with separate `at` and `content` sections
+- Remove `cat` command (superseded by `info --json`)
+- Three-state install: auto (default), `--deps` (force verification), `--no-deps` (skip verification)
+- Full docstrings and help text for all commands, options, and modules
+
 ## 0.5.0
 
 - Add Node.js (npm) and Deno ecosystem support

@@ -1,4 +1,8 @@
-"""Publish resolved dependencies as an AT Protocol record."""
+"""Build and publish AT Protocol records for package distribution.
+
+Handles lockfile parsing, distribution artifact hashing and verification,
+metadata extraction, and record creation via XRPC.
+"""
 
 from __future__ import annotations
 
@@ -11,13 +15,16 @@ import httpx
 from .auth import load_session, refresh_session
 from .ecosystems import detect_ecosystem_from_lockfile, detect_ecosystem_from_url, get_ecosystem
 
-def _hash_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
 COLLECTION = "dev.atrun.module"
 
 
+def _hash_bytes(data: bytes) -> str:
+    """Return the SHA-256 hex digest of raw bytes."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def _hash_file(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file, read in chunks."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -26,11 +33,13 @@ def _hash_file(path: Path) -> str:
 
 
 def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
-    """Extract package name and version from a distribution filename.
+    """Extract (package_name, version) from a distribution filename.
 
-    Supports wheel (.whl) and sdist (.tar.gz) naming conventions.
+    Supports wheel (.whl), sdist (.tar.gz), and npm tarball (.tgz) naming.
+    For example:
+      - 'atrun-0.5.0-py3-none-any.whl' -> ('atrun', '0.5.0')
+      - 'cowsay-1.6.0.tgz' -> ('cowsay', '1.6.0')
     """
-    # Strip extension
     if filename.endswith(".whl"):
         stem = filename[:-4]
     elif filename.endswith(".tar.gz"):
@@ -46,11 +55,32 @@ def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
 
 
 def _resolve_dist(dist_file: Path | None, dist_url: str | None) -> tuple[str, str, str] | None:
-    """Resolve distribution to (name, version, sha256) from local file or URL."""
+    """Resolve a distribution artifact to (name, version, sha256_hex).
+
+    Handles three cases:
+      - Both file and URL: hashes the local file and verifies it matches
+        the remote download. Errors on mismatch. Silently uses the local
+        hash if the remote is not yet available (e.g. GitHub release not
+        uploaded).
+      - URL only: downloads the artifact and hashes it. Ensures the URL
+        is live before publishing.
+      - Neither: returns None.
+    """
     if dist_file and dist_url:
         name, version = _name_version_from_dist_filename(dist_file.name)
-        sha256 = _hash_file(dist_file)
-        return name, version, sha256
+        local_sha256 = _hash_file(dist_file)
+        try:
+            resp = httpx.get(dist_url, follow_redirects=True)
+            resp.raise_for_status()
+            remote_sha256 = _hash_bytes(resp.content)
+            if local_sha256 != remote_sha256:
+                raise SystemExit(
+                    f"Hash mismatch: local {dist_file.name} ({local_sha256[:12]}...) "
+                    f"does not match remote ({remote_sha256[:12]}...)"
+                )
+        except httpx.HTTPError:
+            pass  # Remote not available yet — use local hash
+        return name, version, local_sha256
     if dist_url and not dist_file:
         filename = dist_url.rsplit("/", 1)[-1]
         name, version = _name_version_from_dist_filename(filename)
@@ -69,12 +99,26 @@ def build_record(
     permissions: list[str] | None = None,
     strip_deps: bool = False,
 ) -> dict:
-    """Build the AT Protocol record without publishing it.
+    """Build a dev.atrun.module record without publishing it.
 
-    lockfile: lockfile content as string. If None, uses ecosystem's export.
-    ecosystem: "python", "node", or "deno". Auto-detected if None.
-    permissions: Deno permissions list (only used for deno ecosystem).
-    strip_deps: If True, remove dependency info from entries.
+    Args:
+        lockfile: Lockfile content as a string. If None, auto-exports
+            using the ecosystem's default tool (e.g. uv export for Python).
+            Skipped entirely when strip_deps is True and a dist artifact
+            is provided.
+        dist_file: Path to a local distribution file to hash and include.
+        dist_url: Public URL for the distribution. Becomes the download
+            URL in the record.
+        ecosystem: Target ecosystem ('python', 'node', 'deno'). Auto-detected
+            from lockfile content or dist URL if None.
+        permissions: Deno permissions list (e.g. ['read', 'env', 'net']).
+            Only used for the deno ecosystem.
+        strip_deps: If True, remove dependency arrays from resolved entries
+            and skip lockfile parsing when a dist artifact is provided.
+
+    Returns:
+        A dict representing the complete AT Protocol record, ready for
+        publishing or JSON serialization.
     """
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:
@@ -103,7 +147,6 @@ def build_record(
     if dist_info:
         name, version, sha256 = dist_info
         package_name = name
-        # Only add if not already present in lockfile entries
         existing = next((e for e in entries if e["packageName"] == name and e["packageVersion"] == version), None)
         if existing is None:
             entries.append({
@@ -136,7 +179,6 @@ def build_record(
     }
     if package_name:
         record["package"] = package_name
-        # Add version from the resolved entry
         pkg_entry = next((e for e in entries if e["packageName"] == package_name), None)
         if pkg_entry:
             record["version"] = pkg_entry["packageVersion"]
@@ -153,10 +195,19 @@ def publish(
     ecosystem: str | None = None,
     permissions: list[str] | None = None,
     strip_deps: bool = False,
+    post: bool = False,
 ) -> str:
-    """Publish the lockfile as an AT Protocol record.
+    """Build and publish a record to AT Protocol.
 
-    Returns the AT URI of the created record.
+    Builds the record via build_record(), then creates it on the
+    authenticated user's AT Protocol repo using XRPC createRecord.
+
+    If post is True, also creates a Bluesky post with a link card
+    embedding the record's XRPC URL, using the record's metadata
+    (package name, version, description) for the card content.
+
+    Returns the AT URI of the created record
+    (e.g. at://did:plc:abc123/dev.atrun.module/3mgxyz).
     """
     record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, permissions=permissions, strip_deps=strip_deps)
 
@@ -171,10 +222,19 @@ def publish(
     if "uri" not in resp:
         raise SystemExit(f"Failed to create record: {resp}")
 
-    return resp["uri"]
+    record_uri = resp["uri"]
+
+    if post:
+        post_resp = _create_post(session, did, record_uri, record)
+        if post_resp.get("error") in ("ExpiredToken", "InvalidToken"):
+            session = refresh_session(session)
+            post_resp = _create_post(session, did, record_uri, record)
+
+    return record_uri
 
 
 def _create_record(session: dict, did: str, record: dict) -> dict:
+    """Send a createRecord XRPC request and return the response."""
     resp = httpx.post(
         "https://bsky.social/xrpc/com.atproto.repo.createRecord",
         headers={"Authorization": f"Bearer {session['accessJwt']}"},
@@ -182,6 +242,52 @@ def _create_record(session: dict, did: str, record: dict) -> dict:
             "repo": did,
             "collection": COLLECTION,
             "record": record,
+        },
+    )
+    return resp.json()
+
+
+def _create_post(session: dict, did: str, record_uri: str, record: dict) -> dict:
+    """Create a Bluesky post with a link card pointing to the atrun record.
+
+    The post text includes the package name and version. The link card
+    embed uses the XRPC getRecord URL so the record is accessible via
+    HTTPS.
+    """
+    package = record.get("package", "unknown")
+    version = record.get("version", "")
+    description = record.get("description", "")
+
+    # Build XRPC URL from at:// URI
+    parts = record_uri.replace("at://", "").split("/")
+    xrpc_url = (
+        f"https://bsky.social/xrpc/com.atproto.repo.getRecord"
+        f"?repo={parts[0]}&collection={parts[1]}&rkey={parts[2]}"
+    )
+
+    text = f"{package} {version}"
+
+    post = {
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "embed": {
+            "$type": "app.bsky.embed.external",
+            "external": {
+                "uri": xrpc_url,
+                "title": f"{package} {version}",
+                "description": description,
+            },
+        },
+    }
+
+    resp = httpx.post(
+        "https://bsky.social/xrpc/com.atproto.repo.createRecord",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        json={
+            "repo": did,
+            "collection": "app.bsky.feed.post",
+            "record": post,
         },
     )
     return resp.json()

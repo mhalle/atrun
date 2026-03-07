@@ -159,8 +159,45 @@ def generate_requirements(resolved: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_install_args(record: dict) -> list[str]:
-    """Build npm install command args."""
+SUPPORTED_ENGINES = ("pnpm", "bun", "npm")
+DEFAULT_ENGINE = "pnpm"
+
+
+def _check_pnpm_global_bin():
+    """Check that pnpm global bin directory is configured and in PATH."""
+    import os
+    result = subprocess.run(
+        ["pnpm", "config", "get", "global-bin-dir"],
+        capture_output=True, text=True,
+    )
+    bin_dir = result.stdout.strip() if result.returncode == 0 else ""
+    if not bin_dir or bin_dir == "undefined":
+        raise SystemExit(
+            "pnpm global bin directory is not configured.\n"
+            "Run 'pnpm setup' then restart your shell, or set it manually:\n"
+            "  pnpm config set global-bin-dir ~/Library/pnpm\n"
+            "  export PNPM_HOME=~/Library/pnpm\n"
+            "  export PATH=\"$PNPM_HOME:$PATH\""
+        )
+    if bin_dir not in os.environ.get("PATH", ""):
+        raise SystemExit(
+            f"pnpm global bin directory ({bin_dir}) is not in PATH.\n"
+            "Add to your shell profile:\n"
+            f"  export PATH=\"{bin_dir}:$PATH\""
+        )
+
+
+def _check_engine(engine: str):
+    """Validate engine and check prerequisites."""
+    if engine not in SUPPORTED_ENGINES:
+        raise SystemExit(f"Unknown engine: {engine}. Supported: {', '.join(SUPPORTED_ENGINES)}")
+    if engine == "pnpm":
+        _check_pnpm_global_bin()
+
+
+def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
+    """Build global install command args for the chosen engine."""
+    _check_engine(engine)
     package = record.get("package")
     resolved = record.get("resolved", [])
 
@@ -168,13 +205,18 @@ def generate_install_args(record: dict) -> list[str]:
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
 
-    return ["npm", "install", "-g", pkg_entry["url"]]
+    version = pkg_entry["packageVersion"]
+    return [engine, "install", "-g", f"{package}@{version}"]
 
 
-def generate_run_args(record: dict) -> list[str]:
+def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
     """Build args for running a Node.js package."""
     package = record.get("package")
-    return ["npx", package]
+    if engine == "bun":
+        return ["bunx", package]
+    elif engine == "npm":
+        return ["npx", package]
+    return ["pnpm", "exec", package]
 
 
 def fetch_metadata(url: str) -> dict:
@@ -273,12 +315,12 @@ def _build_pnpm_lockfile(record: dict) -> str:
     return yaml.dump(lock, default_flow_style=False, sort_keys=False)
 
 
-def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run: bool = False) -> list[str] | None:
-    """Install via pnpm with a reconstructed lockfile and --frozen-lockfile.
+def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run: bool = False, engine: str = DEFAULT_ENGINE) -> list[str] | None:
+    """Install with a reconstructed lockfile and frozen lockfile verification.
 
-    1. Reconstruct pnpm-lock.yaml from record (with integrity + deps)
-    2. pnpm install --frozen-lockfile (verifies integrity, populates store)
-    3. pnpm install -g (uses verified packages from store)
+    For pnpm: reconstructs pnpm-lock.yaml, verifies with --frozen-lockfile.
+    For bun/npm: uses --frozen-lockfile for verification.
+    Then installs globally using the chosen engine.
     """
     import click
 
@@ -295,16 +337,20 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
     if not has_deps:
         # Fallback: direct install without lockfile verification
-        cmd = ["pnpm", "install", "-g", f"{package}@{version}", *extra_args]
+        cmd = [engine, "install", "-g", f"{package}@{version}", *extra_args]
         if dry_run:
             return cmd
-        import click
+        _check_engine(engine)
         click.echo("No dependency graph in record — installing without lockfile verification")
         subprocess.run(cmd, check=True)
         return None
 
     if dry_run:
-        return ["pnpm", "install", "--frozen-lockfile", f"{package}@{version}", *extra_args]
+        return [engine, "install", "--frozen-lockfile", f"{package}@{version}", *extra_args]
+
+    # Verified install currently requires pnpm (reconstructs pnpm-lock.yaml)
+    if engine != "pnpm":
+        click.echo(f"Verified install with --deps requires pnpm (using pnpm for verification, {engine} for global install)")
 
     with tempfile.TemporaryDirectory(prefix="atrun-node-") as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -330,9 +376,10 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         )
         click.echo(f"Verified and installed {len(resolved)} packages")
 
-        # Install globally from verified store
+        # Install globally using chosen engine
+        _check_engine(engine)
         subprocess.run(
-            ["pnpm", "install", "-g", f"{package}@{version}", *extra_args],
+            [engine, "install", "-g", f"{package}@{version}", *extra_args],
             check=True,
         )
     return None

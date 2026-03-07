@@ -18,6 +18,69 @@ from .ecosystems import detect_ecosystem_from_lockfile, detect_ecosystem_from_ur
 COLLECTION = "dev.atrun.module"
 
 
+def _resolve_npm_shorthand(spec: str) -> str:
+    """Resolve npm:package or npm:package@version to a tarball URL.
+
+    Without @version, fetches the latest version from the npm registry.
+    """
+    name = spec.removeprefix("npm:")
+    if "@" in name and not name.startswith("@"):
+        name, version = name.rsplit("@", 1)
+    elif name.startswith("@") and "@" in name.split("/", 1)[-1]:
+        # Scoped package: @scope/pkg@version
+        scope_pkg, version = name.rsplit("@", 1)
+        name = scope_pkg
+    else:
+        version = None
+
+    resp = httpx.get(f"https://registry.npmjs.org/{name}")
+    resp.raise_for_status()
+    data = resp.json()
+
+    if version is None:
+        version = data.get("dist-tags", {}).get("latest")
+        if not version:
+            raise SystemExit(f"Cannot determine latest version of {name}")
+
+    tarball = data.get("versions", {}).get(version, {}).get("dist", {}).get("tarball")
+    if not tarball:
+        raise SystemExit(f"Cannot find tarball for {name}@{version}")
+    return tarball
+
+
+
+
+def _resolve_github_shorthand(spec: str) -> str:
+    """Resolve gh:owner/repo or gh:owner/repo@tag to a release asset URL.
+
+    Without @tag, uses the latest release. With @tag, fetches that specific
+    release. Picks the first asset matching common dist extensions
+    (.whl, .tgz, .tar.gz). Errors if no suitable asset is found.
+    """
+    repo = spec.removeprefix("gh:")
+    if "@" in repo:
+        repo, tag = repo.rsplit("@", 1)
+        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    else:
+        api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    resp = httpx.get(api_url)
+    resp.raise_for_status()
+    data = resp.json()
+
+    dist_extensions = (".whl", ".tgz", ".tar.gz")
+    for asset in data.get("assets", []):
+        name = asset["name"]
+        if any(name.endswith(ext) for ext in dist_extensions):
+            return asset["browser_download_url"]
+
+    # Fall back to first asset if no dist extension matched
+    assets = data.get("assets", [])
+    if assets:
+        return assets[0]["browser_download_url"]
+
+    raise SystemExit(f"No assets found in latest release of {repo}")
+
+
 def _hash_bytes(data: bytes) -> str:
     """Return the SHA-256 hex digest of raw bytes."""
     return hashlib.sha256(data).hexdigest()
@@ -96,7 +159,6 @@ def build_record(
     dist_file: Path | None = None,
     dist_url: str | None = None,
     ecosystem: str | None = None,
-    permissions: list[str] | None = None,
     strip_deps: bool = False,
 ) -> dict:
     """Build a dev.atrun.module record without publishing it.
@@ -109,10 +171,8 @@ def build_record(
         dist_file: Path to a local distribution file to hash and include.
         dist_url: Public URL for the distribution. Becomes the download
             URL in the record.
-        ecosystem: Target ecosystem ('python', 'node', 'deno'). Auto-detected
+        ecosystem: Target ecosystem ('python', 'node'). Auto-detected
             from lockfile content or dist URL if None.
-        permissions: Deno permissions list (e.g. ['read', 'env', 'net']).
-            Only used for the deno ecosystem.
         strip_deps: If True, remove dependency arrays from resolved entries
             and skip lockfile parsing when a dist artifact is provided.
 
@@ -120,6 +180,12 @@ def build_record(
         A dict representing the complete AT Protocol record, ready for
         publishing or JSON serialization.
     """
+    # Resolve dist URL shorthands
+    if dist_url and dist_url.startswith("gh:"):
+        dist_url = _resolve_github_shorthand(dist_url)
+    elif dist_url and dist_url.startswith("npm:"):
+        dist_url = _resolve_npm_shorthand(dist_url)
+
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:
         ecosystem = detect_ecosystem_from_lockfile(lockfile)
@@ -174,7 +240,7 @@ def build_record(
     record: dict = {
         "$type": COLLECTION,
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "ecosystem": eco_mod.build_ecosystem_value(permissions=permissions) if ecosystem == "deno" else eco_mod.build_ecosystem_value(),
+        "ecosystem": eco_mod.build_ecosystem_value(),
         "resolved": entries,
     }
     if package_name:
@@ -193,7 +259,6 @@ def publish(
     dist_file: Path | None = None,
     dist_url: str | None = None,
     ecosystem: str | None = None,
-    permissions: list[str] | None = None,
     strip_deps: bool = False,
     post: bool = False,
 ) -> str:
@@ -209,7 +274,7 @@ def publish(
     Returns the AT URI of the created record
     (e.g. at://did:plc:abc123/dev.atrun.module/3mgxyz).
     """
-    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, permissions=permissions, strip_deps=strip_deps)
+    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps)
 
     session = load_session()
     did = session["did"]
@@ -224,13 +289,15 @@ def publish(
 
     record_uri = resp["uri"]
 
+    post_uri = None
     if post:
         post_resp = _create_post(session, did, record_uri, record)
         if post_resp.get("error") in ("ExpiredToken", "InvalidToken"):
             session = refresh_session(session)
             post_resp = _create_post(session, did, record_uri, record)
+        post_uri = post_resp.get("uri")
 
-    return record_uri
+    return record_uri, post_uri
 
 
 def _create_record(session: dict, did: str, record: dict) -> dict:

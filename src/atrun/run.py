@@ -223,13 +223,14 @@ def generate_requirements(resolved: list[dict], record: dict | None = None) -> s
     return "\n".join(lines)
 
 
-def run_module(uri: str, unsigned: bool = False) -> None:
+def run_module(uri: str, unsigned: bool = False, engine: str | None = None) -> None:
     """Fetch a record and run the package in a temporary environment.
 
     For Python, creates an isolated venv, installs dependencies with hash
     verification, and executes the package.
 
-    For Node/Deno, delegates to the ecosystem's native run command.
+    For Node, delegates to the ecosystem's native run command.
+    The engine parameter selects the Node.js package manager (pnpm, bun, npm).
     """
     from .ecosystems import detect_ecosystem_from_record, get_ecosystem
 
@@ -279,5 +280,8 @@ def run_module(uri: str, unsigned: bool = False) -> None:
                 check=True,
             )
     else:
-        cmd = eco_mod.generate_run_args(record)
+        engine_kwargs = {}
+        if engine and eco_name == "node":
+            engine_kwargs["engine"] = engine
+        cmd = eco_mod.generate_run_args(record, **engine_kwargs)
         subprocess.run(cmd, check=True)

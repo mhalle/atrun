@@ -1,9 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+- Remove Deno ecosystem support (doesn't fit single-artifact distribution model)
+- Remove `denoEcosystem` from lexicon
+- Remove `--permission` flag from publish
+- Add `--engine` flag to install and run for choosing Node.js package manager (pnpm, bun, npm)
+- Add `--dist` flag to info command for printing distribution artifact URL
+- Add `gh:owner/repo` and `npm:package` dist URL shorthands for publish
+- Add `--info` display of ecosystem type in info output
+- Detect and report misconfigured pnpm global bin directory with setup instructions
+- Display package name, version, and ecosystem when installing
+- Node verified install uses pnpm for verification, chosen engine for global install
+
 ## 0.6.0
 
 - Add `version`, `description`, `license`, and `url` metadata fields to lexicon
-- Extract metadata from dist artifacts at publish time (wheel METADATA, npm package.json, JSR meta.json)
+- Extract metadata from dist artifacts at publish time (wheel METADATA, npm package.json)
 - Support `License-Expression` field (PEP 639) in wheel metadata
 - Local dist file metadata extraction (no network fetch needed when `--dist-file` is provided)
 - Hash verification between local `--dist-file` and remote `--dist-url` when both are given
@@ -20,19 +33,15 @@
 
 ## 0.5.0
 
-- Add Node.js (npm) and Deno ecosystem support
+- Add Node.js (npm) ecosystem support
 - New `ecosystems` subpackage with registry, detection, and per-ecosystem modules
-- Parse package-lock.json (Node) and deno.lock v4/v5 (Deno) lockfiles
+- Parse package-lock.json (Node) lockfiles
 - Auto-detect ecosystem from lockfile content or dist URL
-- Add `denoEcosystem` to lexicon with `runtime` and `permissions` fields
 - Add `dependencies` array to `depEntry` for dependency graph storage
-- Add `version`, `description`, `license`, and `url` metadata fields to record
-- Extract metadata from dist artifacts at publish time (wheel, npm tarball, JSR)
-- Add `--ecosystem` option to publish (python/node/deno, auto-detected if omitted)
-- Add `--permission` option to publish for Deno permissions
+- Add `--ecosystem` option to publish (python/node, auto-detected if omitted)
 - Add `--deps`/`--no-deps` flags to publish and install
 - Publish with `--no-deps --dist-url` requires no lockfile
-- Verified installs via frozen lockfiles (pnpm for Node, deno --frozen for Deno)
+- Verified installs via frozen lockfiles (pnpm for Node)
 - Install auto-uses frozen lockfile verification when record has dependency graph
 - `info` shows record metadata by default; `--registry` fetches from ecosystem registry
 - Strip leading `@` and whitespace from handle on login

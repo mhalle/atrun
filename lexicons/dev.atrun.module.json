@@ -51,7 +51,7 @@
     },
     "ecosystem": {
       "type": "union",
-      "refs": ["#pythonEcosystem", "#nodeEcosystem", "#denoEcosystem"]
+      "refs": ["#pythonEcosystem", "#nodeEcosystem"]
     },
     "pythonEcosystem": {
       "type": "object",
@@ -69,22 +69,6 @@
         "engine": {
           "type": "string",
           "description": "Runtime engine, e.g. 'node' or 'bun'",
-          "maxLength": 32
-        }
-      }
-    },
-    "denoEcosystem": {
-      "type": "object",
-      "properties": {
-        "runtime": {
-          "type": "string",
-          "description": "Runtime identifier, e.g. 'deno'",
-          "maxLength": 32
-        },
-        "permissions": {
-          "type": "array",
-          "description": "Deno permissions, e.g. 'read', 'env', 'net=example.com'",
-          "items": { "type": "string", "maxLength": 256 },
           "maxLength": 32
         }
       }

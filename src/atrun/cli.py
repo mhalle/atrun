@@ -17,7 +17,7 @@ def cli():
     """Social package distribution on AT Protocol.
 
     Publish, inspect, install, and run packages from AT Protocol records.
-    Supports Python (pip/uv), Node.js (npm/pnpm), and Deno ecosystems.
+    Supports Python (pip/uv) and Node.js (npm/pnpm/bun) ecosystems.
 
     Records can be referenced by AT URI (at://did/collection/rkey) or by
     HTTPS URL (XRPC getRecord endpoint or plain JSON with --unsigned).
@@ -43,12 +43,11 @@ def login(handle: str):
 @click.option("--lockfile", type=click.Path(), help="Path to lockfile, or '-' for stdin. Omit to auto-export via the ecosystem's default tool.")
 @click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file (wheel, tarball) to hash and include.")
 @click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
-@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "deno"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
-@click.option("--permission", "permissions", multiple=True, help="Deno permission to grant (e.g. --permission read --permission env --permission net=example.com). May be specified multiple times.")
+@click.option("--ecosystem", "eco", type=click.Choice(["python", "node"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, permissions: tuple[str, ...], deps: bool, post: bool, dry_run: bool):
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, post: bool, dry_run: bool):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
@@ -73,15 +72,20 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
     elif lockfile:
         lockfile_str = Path(lockfile).read_text()
 
-    perms = list(permissions) if permissions else None
-
     if dry_run:
-        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, permissions=perms, strip_deps=not deps)
+        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps)
         click.echo(json.dumps(record, indent=2))
         return
 
-    at_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, permissions=perms, strip_deps=not deps, post=post)
-    click.echo(at_uri)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, post=post)
+    click.echo(record_uri)
+    if post_uri:
+        # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL
+        from .run import _resolve_handle
+        parts = post_uri.replace("at://", "").split("/")
+        did = parts[0]
+        handle = _resolve_handle(did) or did
+        click.echo(f"https://bsky.app/profile/{handle}/post/{parts[2]}")
 
 
 @cli.command()
@@ -91,7 +95,7 @@ def resolve(uri: str, unsigned: bool):
     """Print resolved dependencies for a published record.
 
     Outputs dependency information in the ecosystem's native format:
-    requirements.txt for Python, package list for Node/Deno.
+    requirements.txt for Python, package list for Node.
 
     URI can be an AT URI (at://...) or an HTTPS URL to an XRPC getRecord
     endpoint.
@@ -113,9 +117,10 @@ def resolve(uri: str, unsigned: bool):
 @cli.command()
 @click.argument("uri")
 @click.option("--json", "as_json", is_flag=True, help="Output as structured JSON with 'at' (envelope) and 'content' sections.")
+@click.option("--dist", "show_dist", is_flag=True, help="Print only the distribution artifact URL.")
 @click.option("--registry", is_flag=True, help="Fetch full metadata from the ecosystem's package registry (PyPI, npm, JSR) instead of showing record metadata.")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def info(uri: str, as_json: bool, registry: bool, unsigned: bool):
+def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: bool):
     """Show metadata for a published package record.
 
     By default, displays metadata stored in the record itself: package name,
@@ -145,6 +150,14 @@ def info(uri: str, as_json: bool, registry: bool, unsigned: bool):
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
+
+    if show_dist:
+        resolved = record.get("resolved", [])
+        pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+        if not pkg_entry:
+            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+        click.echo(pkg_entry["url"])
+        return
 
     if registry:
         # Fetch full metadata from ecosystem registry
@@ -193,8 +206,6 @@ def info(uri: str, as_json: bool, registry: bool, unsigned: bool):
     eco_type = eco.get("$type", "")
     if "python" in eco_type:
         content["ecosystem"] = "python"
-    elif "deno" in eco_type:
-        content["ecosystem"] = "deno"
     elif "node" in eco_type:
         content["ecosystem"] = "node"
 
@@ -228,13 +239,14 @@ def info(uri: str, as_json: bool, registry: bool, unsigned: bool):
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.option("--deps", is_flag=True, help="Force frozen lockfile verification using the record's dependency graph. Errors if the record has no dependency data.")
 @click.option("--no-deps", is_flag=True, help="Skip frozen lockfile verification even if the record has dependency data. Installs using the package manager's default resolution.")
+@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
 @click.option("--dry-run", "install_dry_run", is_flag=True, help="Print the install command without executing it.")
-def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, unsigned: bool, install_dry_run: bool):
+def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
     """Install a package from an AT Protocol record.
 
     Fetches the record, detects the ecosystem, and installs the package
-    using the appropriate tool (uv for Python, pnpm for Node, deno for Deno).
+    using the appropriate tool (uv for Python, pnpm/bun/npm for Node).
 
     By default, uses frozen lockfile verification if the record contains a
     dependency graph (published with --deps), and falls back to direct
@@ -272,6 +284,9 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, un
     eco_name = detect_ecosystem_from_record(record)
     eco_mod = get_ecosystem(eco_name)
 
+    version = record.get("version", "")
+    click.echo(f"Installing {package} {version} ({eco_name})")
+
     if eco_name == "python":
         # Python: use uv tool install with requirements file
         pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
@@ -297,7 +312,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, un
 
         subprocess.run(cmd, check=True)
     else:
-        # Node/Deno: determine whether to use verified install
+        # Node: determine whether to use verified install
         has_dep_info = any(e.get("dependencies") for e in resolved)
 
         if deps and not has_dep_info:
@@ -305,13 +320,18 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, un
 
         use_verified = has_dep_info and not no_deps if not deps else True
 
+        # Pass engine to node ecosystem functions
+        engine_kwargs = {}
+        if engine and eco_name == "node":
+            engine_kwargs["engine"] = engine
+
         if use_verified:
-            result = eco_mod.run_verified_install(record, extra_args=extra_args, dry_run=install_dry_run)
+            result = eco_mod.run_verified_install(record, extra_args=extra_args, dry_run=install_dry_run, **engine_kwargs)
             if install_dry_run and result:
                 click.echo(shlex.join(result))
         else:
             # Direct install — let the package manager resolve deps
-            cmd = eco_mod.generate_install_args(record) + list(extra_args)
+            cmd = eco_mod.generate_install_args(record, **engine_kwargs) + list(extra_args)
             if install_dry_run:
                 click.echo(shlex.join(cmd))
                 return
@@ -320,8 +340,9 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, un
 
 @cli.command()
 @click.argument("uri")
+@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def run(uri: str, unsigned: bool):
+def run(uri: str, engine: str | None, unsigned: bool):
     """Run a package directly from an AT Protocol record.
 
     Fetches the record, installs dependencies into a temporary environment,
@@ -329,12 +350,13 @@ def run(uri: str, unsigned: bool):
     the command exits.
 
     For Python, creates an isolated venv with hash-verified dependencies.
-    For Node/Deno, uses the ecosystem's native run mechanism.
+    For Node, uses the ecosystem's native run mechanism.
 
     \b
     Examples:
       atrun run at://did:plc:abc123/dev.atrun.module/3mgxyz
+      atrun run --engine bun at://did:plc:abc123/dev.atrun.module/3mgxyz
     """
     from .run import run_module
 
-    run_module(uri, unsigned=unsigned)
+    run_module(uri, unsigned=unsigned, engine=engine)

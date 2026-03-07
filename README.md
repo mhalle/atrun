@@ -323,7 +323,7 @@ Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json)
 | `artifacts` | Array of artifact entries (see below) |
 | `derivedFrom` | StrongRef(s) to records this derives from (uri + CID) |
 
-Each artifact entry has optional fields: `id`, `name`, `version`, `digest`, `url`, `artifactType`, `dependencies`, `metadata`, and `ref` (a strongRef to the artifact's own manifest record).
+Each artifact entry has optional fields: `id`, `name`, `version`, `digest`, `url`, `artifactType`, `dependencies`, `metadata`, and `ref` (a strongRef to the artifact's own manifest record). While all fields are optional in the schema, artifacts are expected to provide a unique, dereferenceable, and verifiable descriptor of their resource. What that means depends on the application — Python and npm lockfiles use a combination of `name`, `url`, and `digest`; other applications may use a unique `id` and conventions for accessing the resource through it. Applications are responsible for enforcing these constraints for security and correctness.
 
 ## License
 

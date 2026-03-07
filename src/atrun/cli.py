@@ -105,7 +105,7 @@ def list_cmd(target: str, as_json: bool):
       atrun list @alice.bsky.social:ripgrep
       atrun list --json @alice.bsky.social
     """
-    from .run import list_records
+    from .run import fetch_yanks, list_records
 
     # Parse target: @handle or @handle:package
     if not target.startswith("@"):
@@ -128,7 +128,17 @@ def list_cmd(target: str, as_json: bool):
             raise click.ClickException(f"No records found for {package} by @{handle}")
         raise click.ClickException(f"No records found by @{handle}")
 
+    yanks = fetch_yanks(handle)
+
     if as_json:
+        # Annotate records with yank status
+        for rec in records:
+            uri = rec.get("uri", "")
+            if uri in yanks:
+                rec["yanked"] = True
+                reason = yanks[uri]
+                if reason:
+                    rec["yankReason"] = reason
         click.echo(json.dumps(records, indent=2))
         return
 
@@ -139,7 +149,8 @@ def list_cmd(target: str, as_json: bool):
             ts_str = f"  ({ts})" if ts else ""
             ver = rec.get("version", "")
             ver_str = f"@{ver}" if ver else ""
-            click.echo(f"@{handle}:{package}{ver_str}{ts_str}")
+            yanked = " [yanked]" if rec.get("uri", "") in yanks else ""
+            click.echo(f"@{handle}:{package}{ver_str}{ts_str}{yanked}")
     else:
         # Package list — show latest version of each package
         seen: dict[str, dict] = {}
@@ -151,7 +162,167 @@ def list_cmd(target: str, as_json: bool):
             eco = f" ({rec['ecosystem']})" if rec["ecosystem"] else ""
             ver = rec.get("version", "")
             ver_str = f"@{ver}" if ver else ""
-            click.echo(f"@{handle}:{pkg}{ver_str}{eco}")
+            yanked = " [yanked]" if rec.get("uri", "") in yanks else ""
+            click.echo(f"@{handle}:{pkg}{ver_str}{eco}{yanked}")
+
+
+@cli.command()
+@click.argument("target")
+@click.option("--reason", default="", help="Reason for yanking this version.")
+def yank(target: str, reason: str):
+    """Yank a published package version.
+
+    Marks a version as withdrawn by creating a dev.atrun.yank record
+    that references the original. The original record stays intact —
+    version chains and CIDs are preserved.
+
+    Yanked versions are skipped when resolving @latest and marked
+    in list output. Direct version references still work.
+
+    TARGET is @handle:package@version or an AT URI.
+
+    \b
+    Examples:
+      atrun yank @alice.bsky.social:cowsay@1.6.0
+      atrun yank --reason "security vulnerability" @alice.bsky.social:cowsay@1.6.0
+    """
+    from datetime import datetime, timezone
+
+    from .auth import load_session, refresh_session
+    from .run import fetch_record
+
+    result = fetch_record(target)
+    at_info = result.get("at")
+    if not at_info or "uri" not in at_info or "cid" not in at_info:
+        raise click.ClickException("Cannot yank: record has no AT Protocol envelope.")
+
+    session = load_session()
+    did = session["did"]
+
+    # Verify the record belongs to this user
+    if at_info.get("did") and at_info["did"] != did:
+        raise click.ClickException(f"Cannot yank: record belongs to {at_info.get('handle', at_info['did'])}, not you.")
+
+    yank_record = {
+        "$type": "dev.atrun.yank",
+        "subject": {"uri": at_info["uri"], "cid": at_info["cid"]},
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    if reason:
+        yank_record["reason"] = reason
+
+    import httpx
+    resp = httpx.post(
+        "https://bsky.social/xrpc/com.atproto.repo.createRecord",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        json={
+            "repo": did,
+            "collection": "dev.atrun.yank",
+            "record": yank_record,
+        },
+    )
+    data = resp.json()
+    if data.get("error") in ("ExpiredToken", "InvalidToken"):
+        session = refresh_session(session)
+        resp = httpx.post(
+            "https://bsky.social/xrpc/com.atproto.repo.createRecord",
+            headers={"Authorization": f"Bearer {session['accessJwt']}"},
+            json={
+                "repo": did,
+                "collection": "dev.atrun.yank",
+                "record": yank_record,
+            },
+        )
+        data = resp.json()
+
+    if "uri" not in data:
+        raise click.ClickException(f"Failed to create yank record: {data}")
+
+    content = result.get("content", {})
+    pkg = content.get("package", "?")
+    ver = content.get("version", "?")
+    click.echo(f"Yanked {pkg}@{ver}")
+
+
+@cli.command()
+@click.argument("target")
+def unyank(target: str):
+    """Remove a yank from a published package version.
+
+    Deletes the dev.atrun.yank record, restoring the version to
+    normal status.
+
+    TARGET is @handle:package@version or an AT URI.
+
+    \b
+    Examples:
+      atrun unyank @alice.bsky.social:cowsay@1.6.0
+    """
+    from .auth import load_session, refresh_session
+    from .run import AT_URI_RE, fetch_record
+
+    result = fetch_record(target)
+    at_info = result.get("at")
+    if not at_info or "uri" not in at_info:
+        raise click.ClickException("Cannot unyank: record has no AT Protocol envelope.")
+
+    session = load_session()
+    did = session["did"]
+
+    target_uri = at_info["uri"]
+
+    # Find the yank record for this module record
+    import httpx
+    resp = httpx.get(
+        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        params={"repo": did, "collection": "dev.atrun.yank", "limit": 100},
+    )
+    if resp.status_code != 200:
+        raise click.ClickException("Failed to list yank records.")
+
+    yank_uri = None
+    for rec in resp.json().get("records", []):
+        subject = rec.get("value", {}).get("subject", {})
+        if subject.get("uri") == target_uri:
+            yank_uri = rec["uri"]
+            break
+
+    if not yank_uri:
+        raise click.ClickException("No yank record found for this version.")
+
+    # Delete the yank record
+    m = AT_URI_RE.match(yank_uri)
+    if not m:
+        raise click.ClickException(f"Invalid yank record URI: {yank_uri}")
+    rkey = m.group(3)
+
+    resp = httpx.post(
+        "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        json={
+            "repo": did,
+            "collection": "dev.atrun.yank",
+            "rkey": rkey,
+        },
+    )
+    data = resp.json() if resp.content else {}
+    if data.get("error") in ("ExpiredToken", "InvalidToken"):
+        session = refresh_session(session)
+        resp = httpx.post(
+            "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
+            headers={"Authorization": f"Bearer {session['accessJwt']}"},
+            json={
+                "repo": did,
+                "collection": "dev.atrun.yank",
+                "rkey": rkey,
+            },
+        )
+
+    content = result.get("content", {})
+    pkg = content.get("package", "?")
+    ver = content.get("version", "?")
+    click.echo(f"Unyanked {pkg}@{ver}")
 
 
 @cli.command()
@@ -215,7 +386,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
       atrun info --registry at://did:plc:abc123/dev.atrun.module/3mgxyz
     """
     from .ecosystems import detect_ecosystem_from_record, get_ecosystem
-    from .run import fetch_record
+    from .run import fetch_record, fetch_yanks
 
     result = fetch_record(uri, unsigned=unsigned)
     at_info = result["at"]
@@ -223,6 +394,13 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
+
+    # Check yank status
+    yank_reason = None
+    if at_info and "uri" in at_info and "did" in at_info:
+        yanks = fetch_yanks(at_info["did"])
+        if at_info["uri"] in yanks:
+            yank_reason = yanks[at_info["uri"]]
 
     if versions:
         from .run import fetch_record as _fetch
@@ -354,6 +532,12 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         content["derivedFrom"] = derived.get("uri", "")
 
     content["dependencies"] = len(resolved)
+
+    if yank_reason is not None:
+        content["yanked"] = True
+        if yank_reason:
+            content["yankReason"] = yank_reason
+
     output["content"] = content
 
     # Fetch social info if requested
@@ -375,6 +559,10 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         click.echo(f"version: {content['version']}")
     if "ecosystem" in content:
         click.echo(f"ecosystem: {content['ecosystem']}")
+
+    if yank_reason is not None:
+        reason_str = f": {yank_reason}" if yank_reason else ""
+        click.echo(f"YANKED{reason_str}", err=True)
 
     # Description and metadata
     if "description" in content:
@@ -478,15 +666,25 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
         raise click.ClickException("Cannot use both --deps and --no-deps.")
 
     from .ecosystems import detect_ecosystem_from_record, get_ecosystem
-    from .run import fetch_record, generate_requirements
+    from .run import fetch_record, fetch_yanks, generate_requirements
 
-    record = fetch_record(uri, unsigned=unsigned)["content"]
+    result = fetch_record(uri, unsigned=unsigned)
+    at_info = result["at"]
+    record = result["content"]
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
     resolved = record.get("resolved", [])
     if not resolved:
         raise click.ClickException("Record has no resolved packages.")
+
+    # Check yank status
+    if at_info and "uri" in at_info and "did" in at_info:
+        yanks = fetch_yanks(at_info["did"])
+        if at_info["uri"] in yanks:
+            reason = yanks[at_info["uri"]]
+            reason_str = f": {reason}" if reason else ""
+            raise click.ClickException(f"This version has been yanked{reason_str}. Use a different version or install via the dist URL directly.")
 
     eco_name = detect_ecosystem_from_record(record)
     eco_mod = get_ecosystem(eco_name)

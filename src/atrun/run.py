@@ -18,6 +18,8 @@ BSKY_POST_RE = re.compile(r"^https://bsky\.app/profile/([^/]+)/post/([^/]+)$")
 # @handle:package or @handle:package@version (version can be "latest")
 SHORTHAND_RE = re.compile(r"^@([^:]+):([^@]+)(?:@(.+))?$")
 
+YANK_COLLECTION = "dev.atrun.yank"
+
 
 def resolve_pds_url(handle_or_did: str) -> tuple[str, str]:
     """Resolve a handle or DID to a (PDS base URL, DID) tuple.
@@ -176,12 +178,37 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
     return results
 
 
+def fetch_yanks(handle_or_did: str) -> dict[str, str]:
+    """Fetch all yank records for a user.
+
+    Returns a dict mapping module record URI -> yank reason.
+    """
+    pds_url, did = resolve_pds_url(handle_or_did)
+
+    resp = httpx.get(
+        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
+        params={"repo": did, "collection": YANK_COLLECTION, "limit": 100},
+    )
+    if resp.status_code != 200:
+        return {}
+
+    yanks: dict[str, str] = {}
+    for rec in resp.json().get("records", []):
+        value = rec.get("value", {})
+        subject = value.get("subject", {})
+        uri = subject.get("uri", "")
+        if uri:
+            yanks[uri] = value.get("reason", "")
+    return yanks
+
+
 def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
     """Resolve @handle:package[@version] to a record.
 
     Lists the user's dev.atrun.module records and finds the one matching
     the package name. If version is None or 'latest', returns the most
-    recent. Otherwise matches the exact version.
+    recent non-yanked version. Otherwise matches the exact version
+    (even if yanked).
     """
     pds_url, did = resolve_pds_url(handle)
 
@@ -191,13 +218,19 @@ def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
     )
     resp.raise_for_status()
 
+    # For latest resolution, skip yanked versions
+    is_latest = not version or version == "latest"
+    yanks = fetch_yanks(handle) if is_latest else {}
+
     for rec in resp.json().get("records", []):
         value = rec.get("value", {})
         if value.get("package") != package:
             continue
-        if version and version != "latest":
+        if not is_latest:
             if value.get("version") != version:
                 continue
+        elif rec["uri"] in yanks:
+            continue  # skip yanked versions when resolving latest
         # Match found — fetch via fetch_record for full envelope
         return fetch_record(rec["uri"])
 

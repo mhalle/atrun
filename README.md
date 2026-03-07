@@ -25,9 +25,9 @@ The manifest format is generic — the same record works for Python wheels, npm 
 AT Protocol has a layered architecture that maps naturally to package distribution:
 
 - **PDS** (Personal Data Server) — stores your records. This is where atrun publishes today.
-- **AppView** — aggregates and indexes records across all users. A future AppView for `dev.atpub.manifest` could provide search, discovery, dependency graphs, trust analysis, and supply chain monitoring across the entire network.
+- **AppView** — aggregates and indexes records across all users. No AppView exists yet for `dev.atpub.manifest`. When one is built, it could provide search, discovery, dependency graphs, trust analysis, and supply chain monitoring across the entire network.
 
-Anyone can publish. AppViews decide how to present it. Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance.
+Today, atrun reads and writes directly to PDS instances. Anyone can publish. When AppViews exist, they will decide how to present and index records. Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance.
 
 ## Install
 

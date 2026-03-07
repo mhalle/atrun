@@ -1,6 +1,6 @@
 [project]
 name = "atrun"
-version = "0.14.0"
+version = "0.14.1"
 description = "Social package distribution on AT Protocol"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -18,6 +18,9 @@ atrun = "atrun.cli:cli"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
+
+[tool.atpub]
+handle = "@mhalle-dev.bsky.social"
 
 [build-system]
 requires = ["hatchling"]

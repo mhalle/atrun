@@ -580,10 +580,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         cmd = eco_mod.generate_run_args(record)
         os.execvp(cmd[0], cmd)
     else:
-        engine_kwargs = {}
-        if engine and eco_name == "node":
-            engine_kwargs["engine"] = engine
-        cmd = eco_mod.generate_run_args(record, **engine_kwargs)
+        cmd = eco_mod.generate_run_args(record)
         if eco_name == "go":
             os.environ["GO111MODULE"] = "on"
         os.execvp(cmd[0], cmd)

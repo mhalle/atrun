@@ -149,7 +149,6 @@ def parse_lockfile(content: str) -> list[dict]:
 
 def export_lockfile() -> str:
     """Read ./package-lock.json and return its content."""
-    from pathlib import Path
     lock_path = Path("package-lock.json")
     if not lock_path.exists():
         raise SystemExit("package-lock.json not found in current directory.")
@@ -431,9 +430,6 @@ def extract_dist_metadata(url: str) -> dict:
 
     Returns dict with optional keys: description, license, url.
     """
-    import io
-    import tarfile
-
     resp = httpx.get(url, follow_redirects=True)
     resp.raise_for_status()
 

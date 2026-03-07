@@ -35,7 +35,7 @@ PACKAGE_TYPE_TO_ECOSYSTEM = {v: k for k, v in PACKAGE_TYPES.items()}
 def get_ecosystem(name: str) -> ModuleType:
     """Return the ecosystem module for the given name.
 
-    Valid names: 'python', 'node'.
+    Valid names: 'python', 'node', 'rust', 'go', 'container'.
     Raises SystemExit for unknown ecosystems.
     """
     rel = _ECOSYSTEM_MODULES.get(name)

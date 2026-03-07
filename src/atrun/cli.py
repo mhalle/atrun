@@ -601,7 +601,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     # Integrity
     if "digest" in content:
-        click.echo(f"hash: {content['hash']}")
+        click.echo(f"digest: {content['digest']}")
     click.echo(f"dependencies: {content['dependencies']}")
     if "tool" in content:
         click.echo(f"tool: {content['tool']}")

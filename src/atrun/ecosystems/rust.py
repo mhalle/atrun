@@ -129,11 +129,6 @@ def fetch_metadata(url: str) -> dict:
     """Fetch metadata from crates.io API for a crate."""
     # Extract name and version from download URL
     # URL format: https://crates.io/api/v1/crates/{name}/{version}/download
-    parts = url.rstrip("/download").rsplit("/", 2)
-    if len(parts) < 3:
-        raise ValueError(f"Cannot parse crate URL: {url}")
-    # parts = [..., name, version]  or [..., "crates", name, version]
-    # URL: .../crates/{name}/{version}/download
     url_path = url.replace(CRATES_IO_DL + "/", "")
     segments = url_path.split("/")
     name = segments[0]

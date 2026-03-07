@@ -18,6 +18,7 @@ _ECOSYSTEM_MODULES = {
     "node": ".node",
     "rust": ".rust",
     "go": ".go",
+    "container": ".container",
 }
 
 PACKAGE_TYPES = {
@@ -25,6 +26,7 @@ PACKAGE_TYPES = {
     "node": "dev.atpub.defs#npmPackage",
     "rust": "dev.atpub.defs#rustCrate",
     "go": "dev.atpub.defs#goModule",
+    "container": "dev.atpub.defs#container",
 }
 
 PACKAGE_TYPE_TO_ECOSYSTEM = {v: k for k, v in PACKAGE_TYPES.items()}
@@ -82,6 +84,8 @@ def detect_ecosystem_from_url(url: str) -> str | None:
         return "rust"
     if "proxy.golang.org" in url:
         return "go"
+    if url.startswith("oci://"):
+        return "container"
     return None
 
 
@@ -95,6 +99,19 @@ def detect_ecosystem_from_lockfile(content: str) -> str:
 
     Raises SystemExit if the content cannot be identified.
     """
+    # Try YAML (compose file) — check for services key with image values
+    try:
+        import yaml
+        data = yaml.safe_load(content)
+        if isinstance(data, dict) and "services" in data:
+            services = data["services"]
+            if isinstance(services, dict) and any(
+                isinstance(s, dict) and "image" in s for s in services.values()
+            ):
+                return "container"
+    except Exception:
+        pass
+
     # Try TOML first
     try:
         data = tomllib.loads(content)
@@ -135,4 +152,9 @@ def detect_ecosystem_from_lockfile_path(path: str) -> str | None:
         return "rust"
     if path.endswith("go.sum"):
         return "go"
+    basename = path.rsplit("/", 1)[-1] if "/" in path else path
+    if basename in ("compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"):
+        return "container"
+    if path.endswith(".images"):
+        return "container"
     return None

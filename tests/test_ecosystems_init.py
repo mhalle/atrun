@@ -138,4 +138,40 @@ def test_get_ecosystem_unknown():
 
 
 def test_package_types_keys():
-    assert set(PACKAGE_TYPES.keys()) == {"python", "node", "rust", "go"}
+    assert set(PACKAGE_TYPES.keys()) == {"python", "node", "rust", "go", "container"}
+
+
+# --- container detection ---
+
+
+def test_detect_url_oci():
+    assert detect_ecosystem_from_url("oci://ghcr.io/user/app:1.0.0") == "container"
+
+
+def test_detect_lockfile_path_compose_yml():
+    assert detect_ecosystem_from_lockfile_path("compose.yml") == "container"
+
+
+def test_detect_lockfile_path_docker_compose_yml():
+    assert detect_ecosystem_from_lockfile_path("docker-compose.yml") == "container"
+
+
+def test_detect_lockfile_path_images():
+    assert detect_ecosystem_from_lockfile_path("mystack.images") == "container"
+
+
+def test_detect_lockfile_compose_yaml():
+    content = "services:\n  web:\n    image: nginx:1.25\n"
+    assert detect_ecosystem_from_lockfile(content) == "container"
+
+
+def test_detect_resolved_container_package_type():
+    resolved = [{"url": "oci://ghcr.io/user/app:1.0.0"}]
+    record = {"packageType": "dev.atpub.defs#container", "resolved": resolved}
+    assert detect_ecosystem_from_resolved(resolved, record=record) == "container"
+
+
+def test_get_ecosystem_container():
+    mod = get_ecosystem("container")
+    assert hasattr(mod, "parse_lockfile")
+    assert hasattr(mod, "generate_install_args")

@@ -101,6 +101,23 @@ def _resolve_go_shorthand(spec: str) -> str:
     return f"https://proxy.golang.org/{escaped}/@v/{version}.zip"
 
 
+def _resolve_docker_shorthand(spec: str) -> str:
+    """Resolve docker:image:tag to an oci:// URL.
+
+    Examples:
+      docker:ghcr.io/user/app:1.0.0 -> oci://ghcr.io/user/app:1.0.0
+      docker:nginx:1.25 -> oci://docker.io/library/nginx:1.25
+      docker:user/app -> oci://docker.io/user/app:latest
+    """
+    from .ecosystems.container import _parse_image_ref
+
+    ref = spec.removeprefix("docker:")
+    parsed = _parse_image_ref(ref)
+    name = parsed["name"]
+    tag = parsed["tag"] or "latest"
+    return f"oci://{name}:{tag}"
+
+
 def _resolve_github_shorthand(spec: str) -> str:
     """Resolve gh:owner/repo or gh:owner/repo@tag to a release asset URL.
 
@@ -169,6 +186,14 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
     Handles crates.io URLs (/.../crates/{name}/{version}/download)
     and falls back to filename-based parsing.
     """
+    # oci:// URL: oci://registry/name:tag
+    if url.startswith("oci://"):
+        ref = url.removeprefix("oci://")
+        # Split tag from the end
+        last_colon = ref.rfind(":")
+        if last_colon > ref.rfind("/"):
+            return ref[:last_colon], ref[last_colon + 1:]
+        return ref, "latest"
     # crates.io: /api/v1/crates/{name}/{version}/download
     if "crates.io" in url and "/download" in url:
         import re
@@ -224,6 +249,14 @@ def _resolve_dist(dist_file: Path | None, dist_url: str | None) -> tuple[str, st
             pass  # Remote not available yet — use local hash
         return name, version, local_sha256
     if dist_url and not dist_file:
+        if dist_url.startswith("oci://"):
+            from .ecosystems.container import _resolve_digest
+            name, version = _name_version_from_dist_url(dist_url)
+            ref = dist_url.removeprefix("oci://")
+            digest = _resolve_digest(ref)
+            # digest is already sha256:hex format; strip prefix for consistency
+            sha256 = digest.removeprefix("sha256:")
+            return name, version, sha256
         name, version = _name_version_from_dist_url(dist_url)
         resp = httpx.get(dist_url, follow_redirects=True)
         resp.raise_for_status()
@@ -238,7 +271,7 @@ def build_record(
     dist_url: str | None = None,
     ecosystem: str | None = None,
     strip_deps: bool = False,
-    derived_from: str | None = None,
+    derived_from: tuple[str, ...] | None = None,
 ) -> dict:
     """Build a dev.atpub.manifest record without publishing it.
 
@@ -254,8 +287,8 @@ def build_record(
             from lockfile content or dist URL if None.
         strip_deps: If True, remove dependency arrays from resolved entries
             and skip lockfile parsing when a dist artifact is provided.
-        derived_from: URI of the record this derives from. Accepts AT URIs,
-            XRPC HTTPS URLs, or bsky.app post URLs. Resolved to a strongRef.
+        derived_from: URIs of records this derives from. Accepts AT URIs,
+            XRPC HTTPS URLs, or bsky.app post URLs. Each resolved to a strongRef.
 
     Returns:
         A dict representing the complete AT Protocol record, ready for
@@ -270,6 +303,8 @@ def build_record(
         dist_url = _resolve_crate_shorthand(dist_url)
     elif dist_url and dist_url.startswith("go:"):
         dist_url = _resolve_go_shorthand(dist_url)
+    elif dist_url and dist_url.startswith("docker:"):
+        dist_url = _resolve_docker_shorthand(dist_url)
 
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:
@@ -356,12 +391,15 @@ def build_record(
 
     if derived_from:
         from .run import fetch_record
-        result = fetch_record(derived_from)
-        at_info = result.get("at")
-        if at_info and "uri" in at_info and "cid" in at_info:
-            record["derivedFrom"] = [{"uri": at_info["uri"], "cid": at_info["cid"]}]
-        else:
-            raise SystemExit(f"Cannot resolve derivedFrom: {derived_from} (no AT envelope)")
+        refs = []
+        for uri in derived_from:
+            result = fetch_record(uri)
+            at_info = result.get("at")
+            if at_info and "uri" in at_info and "cid" in at_info:
+                refs.append({"uri": at_info["uri"], "cid": at_info["cid"]})
+            else:
+                raise SystemExit(f"Cannot resolve derivedFrom: {uri} (no AT envelope)")
+        record["derivedFrom"] = refs
 
     return record
 
@@ -372,7 +410,7 @@ def publish(
     dist_url: str | None = None,
     ecosystem: str | None = None,
     strip_deps: bool = False,
-    derived_from: str | None = None,
+    derived_from: tuple[str, ...] | None = None,
     no_derived_from: bool = False,
     post: bool = False,
 ) -> str:
@@ -396,7 +434,7 @@ def publish(
     # Auto-link to previous version if not explicitly provided or suppressed
     package = record.get("package")
     if package and "derivedFrom" not in record and not no_derived_from:
-        prev = _find_previous_record(session, did, package)
+        prev = _find_previous_record(session, did, package, record.get("packageType"))
         if prev:
             record["derivedFrom"] = [prev]
 
@@ -421,12 +459,12 @@ def publish(
     return record_uri, post_uri
 
 
-def _find_previous_record(session: dict, did: str, package: str) -> dict | None:
+def _find_previous_record(session: dict, did: str, package: str, package_type: str | None = None) -> dict | None:
     """Find the most recent existing record for the same package.
 
     Lists records in reverse chronological order (newest TID first) and
-    returns the first one matching the package name as a strongRef
-    {uri, cid}, or None if no previous record exists.
+    returns the first one matching the package name and packageType as a
+    strongRef {uri, cid}, or None if no previous record exists.
     """
     resp = httpx.get(
         "https://bsky.social/xrpc/com.atproto.repo.listRecords",
@@ -436,8 +474,12 @@ def _find_previous_record(session: dict, did: str, package: str) -> dict | None:
     if resp.status_code != 200:
         return None
     for rec in resp.json().get("records", []):
-        if rec.get("value", {}).get("package") == package:
-            return {"uri": rec["uri"], "cid": rec["cid"]}
+        value = rec.get("value", {})
+        if value.get("package") != package:
+            continue
+        if package_type and value.get("packageType") != package_type:
+            continue
+        return {"uri": rec["uri"], "cid": rec["cid"]}
     return None
 
 

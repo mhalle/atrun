@@ -472,12 +472,39 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
     package = record.get("package")
     if not package:
+        # For multi-image container records, suggest using docker compose directly
+        eco_name = detect_ecosystem_from_resolved(resolved, record=record)
+        if eco_name == "container":
+            raise SystemExit(
+                "Multi-image container record has no main package. "
+                "Use 'atrun fetch' to pull the images, then run with docker compose."
+            )
         raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
     eco_name = detect_ecosystem_from_resolved(resolved, record=record)
     eco_mod = get_ecosystem(eco_name)
 
     import os
+
+    if eco_name == "container":
+        from .ecosystems.container import _build_image_ref, verify_digest as _verify_container
+
+        pkg_entry = next((e for e in resolved if e["name"] == package), resolved[0])
+        pkg_hash = pkg_entry.get("hash", "")
+
+        if do_verify and pkg_hash:
+            ref = f"{pkg_entry['name']}:{pkg_entry['version']}"
+            print(f"Verifying {package}...", file=sys.stderr)
+            try:
+                _verify_container(ref, pkg_hash, engine or "docker")
+            except SystemExit as exc:
+                raise SystemExit(str(exc))
+            print("Digest verified.", file=sys.stderr)
+
+        digest_ref = _build_image_ref(pkg_entry)
+        selected_engine = engine or "docker"
+        cmd = [selected_engine, "run", "--rm", digest_ref]
+        os.execvp(cmd[0], cmd)
 
     if eco_name == "python":
         pkg_entry = next((e for e in resolved if e["name"] == package), None)

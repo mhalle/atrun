@@ -84,3 +84,44 @@ def test_url_golang_uppercase_escape():
     )
     assert name == "github.com/Azure/azure-sdk"
     assert version == "v1.0.0"
+
+
+# --- oci:// URL parsing ---
+
+
+def test_url_oci_full():
+    name, version = _name_version_from_dist_url("oci://ghcr.io/user/app:1.0.0")
+    assert name == "ghcr.io/user/app"
+    assert version == "1.0.0"
+
+
+def test_url_oci_bare():
+    name, version = _name_version_from_dist_url("oci://docker.io/library/nginx:1.25")
+    assert name == "docker.io/library/nginx"
+    assert version == "1.25"
+
+
+def test_url_oci_no_tag():
+    name, version = _name_version_from_dist_url("oci://ghcr.io/user/app")
+    assert name == "ghcr.io/user/app"
+    assert version == "latest"
+
+
+# --- docker shorthand ---
+
+
+def test_docker_shorthand_full():
+    from atrun.publish import _resolve_docker_shorthand
+    assert _resolve_docker_shorthand("docker:ghcr.io/user/app:1.0.0") == "oci://ghcr.io/user/app:1.0.0"
+
+
+def test_docker_shorthand_bare():
+    from atrun.publish import _resolve_docker_shorthand
+    result = _resolve_docker_shorthand("docker:nginx:1.25")
+    assert result == "oci://docker.io/library/nginx:1.25"
+
+
+def test_docker_shorthand_no_tag():
+    from atrun.publish import _resolve_docker_shorthand
+    result = _resolve_docker_shorthand("docker:user/app")
+    assert result == "oci://docker.io/user/app:latest"

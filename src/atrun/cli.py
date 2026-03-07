@@ -45,13 +45,13 @@ def login(handle: str):
 @click.option("--lockfile", type=click.Path(), help="Path to lockfile, or '-' for stdin. Omit to auto-export via the ecosystem's default tool.")
 @click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file (wheel, tarball) to hash and include.")
 @click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
-@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust", "go"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
+@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust", "go", "container"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
-@click.option("--derived-from", "derived_from", help="AT URI, XRPC URL, or bsky.app URL of the record this derives from. Auto-detected from previous versions if omitted.")
+@click.option("--derived-from", "derived_from", multiple=True, help="AT URI, XRPC URL, or bsky.app URL of a record this derives from. Can be specified multiple times. Auto-detected from previous versions if omitted.")
 @click.option("--no-derived-from", is_flag=True, help="Suppress automatic derivedFrom linking to previous versions.")
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: str | None, no_derived_from: bool, post: bool, dry_run: bool):
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
@@ -77,11 +77,11 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         lockfile_str = Path(lockfile).read_text()
 
     if dry_run:
-        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from)
+        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None)
         click.echo(json.dumps(record, indent=2))
         return
 
-    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from, no_derived_from=no_derived_from, post=post)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post)
     click.echo(record_uri)
     if post_uri:
         # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL
@@ -156,8 +156,12 @@ def list_cmd(target: str, as_json: bool):
     else:
         # Package list — show latest version of each package
         seen: dict[str, dict] = {}
+        unnamed = []
         for rec in records:
             pkg = rec["package"]
+            if not pkg:
+                unnamed.append(rec)
+                continue
             if pkg not in seen:
                 seen[pkg] = rec
         for pkg, rec in seen.items():
@@ -166,6 +170,11 @@ def list_cmd(target: str, as_json: bool):
             ver_str = f"@{ver}" if ver else ""
             yanked = " [yanked]" if rec.get("uri", "") in yanks else ""
             click.echo(f"@{handle}:{pkg}{ver_str}{eco}{yanked}")
+        for rec in unnamed:
+            eco = f" ({rec['ecosystem']})" if rec["ecosystem"] else ""
+            ts = f"  ({rec['timestamp']})" if rec.get("timestamp") else ""
+            yanked = " [yanked]" if rec.get("uri", "") in yanks else ""
+            click.echo(f"{rec['uri']}{eco}{ts}{yanked}")
 
 
 @cli.command()
@@ -393,9 +402,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     result = fetch_record(uri, unsigned=unsigned)
     at_info = result["at"]
     record = result["content"]
-    package = record.get("package")
-    if not package:
-        raise click.ClickException("Record has no 'package' field.")
+    package = record.get("package", "")
 
     # Check yank status
     yank_reason = None
@@ -515,7 +522,9 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
     elif unsigned:
         output["at"] = None
 
-    content: dict = {"package": package}
+    content: dict = {}
+    if package:
+        content["package"] = package
     for field in ("version", "description", "license", "url"):
         if field in record:
             content[field] = record[field]
@@ -564,11 +573,18 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     # Human-readable output — grouped logically
     # Package identity
-    click.echo(f"package: {content['package']}")
+    if "package" in content:
+        click.echo(f"package: {content['package']}")
     if "version" in content:
         click.echo(f"version: {content['version']}")
     if "packageType" in content:
         click.echo(f"packageType: {content['packageType']}")
+
+    # For package-less records (e.g. multi-image container), list resolved entries
+    if not package and resolved:
+        click.echo("images:")
+        for entry in resolved:
+            click.echo(f"  {entry['name']}:{entry.get('version', 'latest')}")
 
     if yank_reason is not None:
         reason_str = f": {yank_reason}" if yank_reason else ""
@@ -678,6 +694,36 @@ def verify(target: str, as_json: bool, unsigned: bool):
         raise click.ClickException(f"Package '{package}' has no hash in the record.")
 
     url = pkg_entry["url"]
+
+    # Container images use digest verification instead of download
+    if url.startswith("oci://"):
+        from .ecosystems.container import verify_digest as _verify_container
+        ref = url.removeprefix("oci://")
+        click.echo(f"Verifying {package} from {ref}...", err=True)
+        try:
+            _verify_container(ref, pkg_hash)
+        except SystemExit as exc:
+            if as_json:
+                click.echo(json.dumps({
+                    "verified": False,
+                    "package": package,
+                    "url": url,
+                    "error": str(exc),
+                }, indent=2))
+            else:
+                click.echo(f"FAILED: {exc}", err=True)
+            raise SystemExit(1)
+        if as_json:
+            click.echo(json.dumps({
+                "verified": True,
+                "package": package,
+                "url": url,
+                "hash": pkg_hash,
+            }, indent=2))
+        else:
+            click.echo(f"Verified: {pkg_hash}")
+        return
+
     click.echo(f"Verifying {package} from {url}...", err=True)
 
     try:
@@ -752,6 +798,43 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
     dest_dir = Path(directory)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    # Container images: use docker save instead of HTTP download
+    eco_url = entries[0].get("url", "") if entries else ""
+    if eco_url.startswith("oci://"):
+        import subprocess
+
+        click.echo(f"Fetching {len(entries)} image{'s' if len(entries) != 1 else ''} to {dest_dir}/", err=True)
+        from .ecosystems.container import verify_digest as _verify_container
+        failed = []
+        for entry in entries:
+            name = entry["name"]
+            ref = entry["url"].removeprefix("oci://")
+            pkg_hash = entry.get("hash", "")
+            safe_name = name.replace("/", "_")
+            dest = dest_dir / f"{safe_name}.tar"
+
+            if do_verify and pkg_hash:
+                try:
+                    _verify_container(ref, pkg_hash)
+                except SystemExit as exc:
+                    click.echo(f"FAILED {name}: {exc}", err=True)
+                    failed.append(name)
+                    continue
+
+            try:
+                subprocess.run(
+                    ["docker", "save", "-o", str(dest), ref],
+                    check=True, capture_output=True, text=True,
+                )
+                click.echo(f"{dest}")
+            except Exception as exc:
+                click.echo(f"FAILED {name}: {exc}", err=True)
+                failed.append(name)
+
+        if failed:
+            raise SystemExit(f"{len(failed)} image(s) failed")
+        return
+
     click.echo(f"Fetching {len(entries)} artifact{'s' if len(entries) != 1 else ''} to {dest_dir}/", err=True)
 
     def _fetch_one(client: httpx.Client, entry: dict) -> tuple[str, Path | None, str | None]:
@@ -800,7 +883,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
 @click.option("--deps", is_flag=True, help="Force frozen lockfile verification using the record's dependency graph. Errors if the record has no dependency data.")
 @click.option("--no-deps", is_flag=True, help="Skip frozen lockfile verification even if the record has dependency data. Installs using the package manager's default resolution.")
 @click.option("--verify/--no-verify", "do_verify", default=True, help="Verify the main package artifact hash before installing (default: --verify).")
-@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
+@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm", "docker", "crane"]), default=None, help="Package manager or container engine to use.")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
 @click.option("--dry-run", "install_dry_run", is_flag=True, help="Print the install command without executing it.")
 def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do_verify: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
@@ -858,6 +941,29 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
     version = record.get("version", "")
     click.echo(f"Installing {package} {version} ({eco_name})")
+
+    if eco_name == "container":
+        from .ecosystems.container import verify_digest as _verify_container
+
+        # Container: verify digest then docker pull each image
+        for entry in resolved:
+            ref = f"{entry['name']}:{entry['version']}"
+            pkg_hash = entry.get("hash", "")
+
+            if do_verify and pkg_hash:
+                click.echo(f"Verifying {entry['name']}...", err=True)
+                _verify_container(ref, pkg_hash, engine or "docker")
+                click.echo("Digest verified.", err=True)
+
+            selected_engine = engine or "docker"
+            digest_ref = f"{entry['name']}@{pkg_hash}" if pkg_hash else ref
+            cmd = [selected_engine, "pull", digest_ref, *extra_args]
+            if install_dry_run:
+                import shlex as _shlex
+                click.echo(_shlex.join(cmd))
+                continue
+            subprocess.run(cmd, check=True)
+        return
 
     if eco_name == "python":
         # Python: use uv tool install with requirements file
@@ -986,7 +1092,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 @cli.command()
 @click.argument("uri")
 @click.option("--verify/--no-verify", "do_verify", default=True, help="Verify the main package artifact hash before running (default: --verify).")
-@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm"]), default=None, help="Node.js package manager to use (default: pnpm).")
+@click.option("--engine", type=click.Choice(["pnpm", "bun", "npm", "docker", "crane"]), default=None, help="Package manager or container engine to use.")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
 def run(uri: str, do_verify: bool, engine: str | None, unsigned: bool):
     """Run a package directly from an AT Protocol record.

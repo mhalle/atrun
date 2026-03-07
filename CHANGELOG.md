@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- Add `info --social` flag: shows publisher profile (followers, bio) and Bluesky post engagement (likes, reposts, replies)
+- Social info available in both human-readable and `--json` output
+
 ## 0.8.0
 
 - Automatic `derivedFrom` linking: new records point back to the previous version of the same package with a cryptographically verified strongRef (uri + CID)

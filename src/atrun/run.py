@@ -199,6 +199,122 @@ def fetch_record(uri: str, unsigned: bool = False) -> dict:
     return {"at": at_info, "content": data["value"]}
 
 
+def fetch_social_info(at_info: dict) -> dict | None:
+    """Fetch social context for a published record.
+
+    Looks up the publisher's profile and searches their recent posts for
+    one embedding the record's XRPC URL. If found, fetches like count,
+    repost count, and reply thread.
+
+    Returns a dict with 'publisher' and optionally 'post' sections,
+    or None if at_info is missing.
+    """
+    if not at_info or "did" not in at_info:
+        return None
+
+    did = at_info["did"]
+    record_uri = at_info.get("uri", "")
+
+    result: dict = {}
+
+    # Publisher profile
+    try:
+        resp = httpx.get(
+            "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile",
+            params={"actor": did},
+        )
+        if resp.status_code == 200:
+            profile = resp.json()
+            result["publisher"] = {
+                "handle": profile.get("handle", ""),
+                "displayName": profile.get("displayName", ""),
+                "followersCount": profile.get("followersCount", 0),
+                "followsCount": profile.get("followsCount", 0),
+                "postsCount": profile.get("postsCount", 0),
+            }
+            desc = profile.get("description", "")
+            if desc:
+                result["publisher"]["description"] = desc
+    except Exception:
+        pass
+
+    # Build XRPC URL to match against post embeds
+    m = AT_URI_RE.match(record_uri)
+    if not m:
+        return result or None
+
+    xrpc_url = (
+        f"https://bsky.social/xrpc/com.atproto.repo.getRecord"
+        f"?repo={m.group(1)}&collection={m.group(2)}&rkey={m.group(3)}"
+    )
+
+    # Search publisher's recent posts for one embedding this record
+    try:
+        resp = httpx.get(
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed",
+            params={"actor": did, "limit": 50, "filter": "posts_no_replies"},
+        )
+        if resp.status_code != 200:
+            return result or None
+
+        post_uri = None
+        for item in resp.json().get("feed", []):
+            post = item.get("post", {})
+            embed = post.get("record", {}).get("embed", {})
+            external_uri = embed.get("external", {}).get("uri", "")
+            if xrpc_url in external_uri:
+                post_uri = post.get("uri")
+                break
+            # Also check facets
+            for facet in post.get("record", {}).get("facets", []):
+                for feature in facet.get("features", []):
+                    if xrpc_url in feature.get("uri", ""):
+                        post_uri = post.get("uri")
+                        break
+
+        if not post_uri:
+            return result or None
+
+        # Fetch post thread for engagement
+        resp = httpx.get(
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread",
+            params={"uri": post_uri, "depth": 10},
+        )
+        if resp.status_code != 200:
+            return result or None
+
+        thread = resp.json().get("thread", {})
+        post_data = thread.get("post", {})
+
+        post_info: dict = {
+            "uri": post_uri,
+            "likeCount": post_data.get("likeCount", 0),
+            "repostCount": post_data.get("repostCount", 0),
+            "replyCount": post_data.get("replyCount", 0),
+        }
+
+        # Extract replies
+        replies = []
+        for reply in thread.get("replies", []):
+            reply_post = reply.get("post", {})
+            author = reply_post.get("author", {})
+            text = reply_post.get("record", {}).get("text", "")
+            if text:
+                replies.append({
+                    "handle": author.get("handle", ""),
+                    "text": text,
+                })
+        if replies:
+            post_info["replies"] = replies
+
+        result["post"] = post_info
+
+    except Exception:
+        pass
+
+    return result or None
+
+
 def generate_requirements(resolved: list[dict], record: dict | None = None) -> str:
     """Generate dependency output in the ecosystem's native format.
 

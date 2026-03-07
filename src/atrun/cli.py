@@ -119,8 +119,9 @@ def resolve(uri: str, unsigned: bool):
 @click.option("--json", "as_json", is_flag=True, help="Output as structured JSON with 'at' (envelope) and 'content' sections.")
 @click.option("--dist", "show_dist", is_flag=True, help="Print only the distribution artifact URL.")
 @click.option("--registry", is_flag=True, help="Fetch full metadata from the ecosystem's package registry (PyPI, npm, JSR) instead of showing record metadata.")
+@click.option("--social", is_flag=True, help="Show social context: publisher profile and post engagement (likes, reposts, replies).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: bool):
+def info(uri: str, as_json: bool, show_dist: bool, registry: bool, social: bool, unsigned: bool):
     """Show metadata for a published package record.
 
     By default, displays metadata stored in the record itself: package name,
@@ -132,13 +133,17 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: boo
     registry (wheel METADATA for Python, package.json for npm, meta.json
     for JSR).
 
+    With --social, shows publisher profile (followers, bio) and engagement
+    on the associated Bluesky post (likes, reposts, replies).
+
     With --json, outputs structured JSON with separate 'at' and 'content'
-    sections.
+    sections (and 'social' when --social is used).
 
     \b
     Examples:
       atrun info at://did:plc:abc123/dev.atrun.module/3mgxyz
       atrun info --json at://did:plc:abc123/dev.atrun.module/3mgxyz
+      atrun info --social at://did:plc:abc123/dev.atrun.module/3mgxyz
       atrun info --registry at://did:plc:abc123/dev.atrun.module/3mgxyz
     """
     from .ecosystems import detect_ecosystem_from_record, get_ecosystem
@@ -217,6 +222,14 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: boo
     content["dependencies"] = len(resolved)
     output["content"] = content
 
+    # Fetch social info if requested
+    social_info = None
+    if social and at_info:
+        from .run import fetch_social_info
+        social_info = fetch_social_info(at_info)
+        if social_info:
+            output["social"] = social_info
+
     if as_json:
         click.echo(json.dumps(output, indent=2))
         return
@@ -236,6 +249,33 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: boo
 
     for key, value in content.items():
         click.echo(f"{key}: {value}")
+
+    if social_info:
+        pub = social_info.get("publisher")
+        if pub:
+            click.echo("")
+            display = pub.get("displayName", "")
+            handle = pub.get("handle", "")
+            if display:
+                click.echo(f"profile: {display} (@{handle})")
+            else:
+                click.echo(f"profile: @{handle}")
+            click.echo(f"followers: {pub.get('followersCount', 0)}")
+            desc = pub.get("description", "")
+            if desc:
+                # Show first line of bio
+                click.echo(f"bio: {desc.splitlines()[0]}")
+
+        post_info = social_info.get("post")
+        if post_info:
+            click.echo("")
+            likes = post_info.get("likeCount", 0)
+            reposts = post_info.get("repostCount", 0)
+            replies_count = post_info.get("replyCount", 0)
+            click.echo(f"post: {likes} likes, {reposts} reposts, {replies_count} replies")
+
+            for reply in post_info.get("replies", []):
+                click.echo(f"  @{reply['handle']}: {reply['text']}")
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})

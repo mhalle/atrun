@@ -2,6 +2,8 @@
 
 Social package distribution on AT Protocol.
 
+> **Alpha experiment.** This project explores decentralized package distribution on AT Protocol. The ideas are sound but the implementation is very early — the schema, CLI, and record format will change without notice. Do not use this for production systems or anything you intend to maintain long-term. If you're interested in the direction, follow along, but don't build on it yet.
+
 ## Why
 
 Package registries like PyPI, npm, and crates.io are centralized services that store both metadata and artifacts. They work well, but they're single points of control — for metadata, for identity, and for discovery.

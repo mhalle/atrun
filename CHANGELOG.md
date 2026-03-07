@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.3
+
+- Add `--version` flag to CLI
+- Add `[tool.atpub]` handle to pyproject.toml
+- Add PyPI trusted publishing workflow
+- Add alpha experiment warning to README
+
 ## 0.14.0
 
 **Breaking schema changes** — existing records on AT Protocol are incompatible.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+
+- Add `list` command: `atrun list @handle` shows all packages, `atrun list @handle:package` shows all versions
+- Add `info --versions` flag: follows the `derivedFrom` chain to show cryptographically verified version history
+- Output uses `@handle:package@version` shorthand format — every line is copy-pasteable
+- Update README with shorthand examples, list command, version chains, and addressing table
+
 ## 0.12.0
 
 - Add `@handle:package[@version]` shorthand for all commands (info, install, run, resolve)

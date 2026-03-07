@@ -127,6 +127,55 @@ def _fetch_from_bsky_post(handle: str, rkey: str) -> dict:
     return fetch_record(record_url)
 
 
+def list_records(handle: str, package: str | None = None) -> list[dict]:
+    """List dev.atrun.module records for a user.
+
+    Returns a list of dicts with uri, package, version, ecosystem, and
+    timestamp fields. If package is specified, filters to that package only.
+    Records are returned newest first.
+    """
+    pds_url, did = resolve_pds_url(handle)
+
+    resp = httpx.get(
+        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
+        params={"repo": did, "collection": "dev.atrun.module", "limit": 100, "reverse": False},
+    )
+    resp.raise_for_status()
+
+    results = []
+    for rec in resp.json().get("records", []):
+        value = rec.get("value", {})
+        pkg = value.get("package", "")
+        if package and pkg != package:
+            continue
+
+        # Extract rkey for timestamp
+        m = AT_URI_RE.match(rec.get("uri", ""))
+        ts = None
+        if m:
+            ts = _decode_tid_timestamp(m.group(3))
+
+        eco = value.get("ecosystem", {})
+        eco_type = eco.get("$type", "")
+        eco_name = ""
+        if "python" in eco_type:
+            eco_name = "python"
+        elif "node" in eco_type:
+            eco_name = "node"
+        elif "rust" in eco_type:
+            eco_name = "rust"
+
+        results.append({
+            "uri": rec["uri"],
+            "package": pkg,
+            "version": value.get("version", ""),
+            "ecosystem": eco_name,
+            "timestamp": ts,
+        })
+
+    return results
+
+
 def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
     """Resolve @handle:package[@version] to a record.
 

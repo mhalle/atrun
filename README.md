@@ -108,11 +108,14 @@ atrun publish --dist-file dist/mypackage-1.0.0-py3-none-any.whl \
 
 ### Install a package
 
+Using the `@handle:package` shorthand:
+
 ```
-atrun install at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun install @alice.bsky.social:cowsay
+atrun install @alice.bsky.social:cowsay@1.6.0
 ```
 
-All URL formats work:
+All URL formats also work:
 
 ```
 atrun install at://did:plc:abc123/dev.atrun.module/3mgxyz
@@ -123,21 +126,49 @@ atrun install https://bsky.app/profile/alice.bsky.social/post/3mgxyz
 Choose a Node.js package manager:
 
 ```
-atrun install --engine bun at://did:plc:abc123/dev.atrun.module/3mgxyz
-atrun install --engine npm at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun install --engine bun @alice.bsky.social:cowsay
+atrun install --engine npm @alice.bsky.social:cowsay
 ```
 
 Control dependency verification:
 
 ```
-atrun install --deps at://...      # require frozen lockfile verification
-atrun install --no-deps at://...   # skip verification, let the package manager resolve
+atrun install --deps @alice.bsky.social:cowsay      # require frozen lockfile verification
+atrun install --no-deps @alice.bsky.social:cowsay   # skip verification, let the package manager resolve
 ```
+
+### List packages
+
+List all packages published by a user:
+
+```
+atrun list @alice.bsky.social
+```
+
+```
+@alice.bsky.social:atrun@0.12.0 (python)
+@alice.bsky.social:ripgrep@15.1.0 (rust)
+@alice.bsky.social:cowsay@1.6.0 (node)
+```
+
+List all versions of a specific package:
+
+```
+atrun list @alice.bsky.social:atrun
+```
+
+```
+@alice.bsky.social:atrun@0.12.0  (2026-03-07T05:29:18Z)
+@alice.bsky.social:atrun@0.11.0  (2026-03-07T05:19:09Z)
+@alice.bsky.social:atrun@0.9.0   (2026-03-07T04:56:02Z)
+```
+
+Every line is a usable shorthand — copy-paste it into `atrun install` or `atrun info`.
 
 ### Inspect a record
 
 ```
-atrun info at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun info @alice.bsky.social:ripgrep
 ```
 
 ```
@@ -158,32 +189,45 @@ cid: bafyreihddco5gubbss4vmhe4464zb47kt4p4lzmp5acy766o3alxvrjoam
 Structured JSON:
 
 ```
-atrun info --json at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun info --json @alice.bsky.social:ripgrep
 ```
 
 Full raw record from the PDS:
 
 ```
-atrun info --raw at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun info --raw @alice.bsky.social:ripgrep
+```
+
+Follow the version chain (via `derivedFrom` links):
+
+```
+atrun info --versions @alice.bsky.social:atrun
+```
+
+```
+* @alice.bsky.social:atrun@0.12.0  (2026-03-07T05:29:18Z)
+  @alice.bsky.social:atrun@0.11.0  (2026-03-07T05:19:09Z)
+  @alice.bsky.social:atrun@0.9.0   (2026-03-07T04:56:02Z)
+  @alice.bsky.social:atrun@0.8.0   (2026-03-07T04:38:44Z)
 ```
 
 Social context (publisher profile, post engagement):
 
 ```
-atrun info --social at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun info --social @alice.bsky.social:cowsay
 ```
 
 Get the distribution URL for use with other tools:
 
 ```
-uv add $(atrun info --dist at://did:plc:abc123/dev.atrun.module/3mgxyz)
-pnpm install $(atrun info --dist at://did:plc:abc123/dev.atrun.module/3mgxyz)
+uv add $(atrun info --dist @alice.bsky.social:mypackage)
+pnpm install $(atrun info --dist @alice.bsky.social:cowsay)
 ```
 
 Registry metadata (from PyPI, npm, or crates.io):
 
 ```
-atrun info --registry at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun info --registry @alice.bsky.social:ripgrep
 ```
 
 ### Resolve dependencies
@@ -191,7 +235,7 @@ atrun info --registry at://did:plc:abc123/dev.atrun.module/3mgxyz
 Print dependencies in the ecosystem's native format:
 
 ```
-atrun resolve at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun resolve @alice.bsky.social:mypackage
 ```
 
 ### Run a package
@@ -199,7 +243,7 @@ atrun resolve at://did:plc:abc123/dev.atrun.module/3mgxyz
 Install into a temporary environment and execute:
 
 ```
-atrun run at://did:plc:abc123/dev.atrun.module/3mgxyz
+atrun run @alice.bsky.social:cowsay
 ```
 
 ## Version chains
@@ -211,11 +255,17 @@ atrun publish --dist-url crate:ripgrep@15.0.0       # first publish
 atrun publish --dist-url crate:ripgrep@15.1.0       # auto-links to 15.0.0
 ```
 
-You can also link explicitly to any record — useful for forks or cross-ecosystem ports:
+View the chain:
+
+```
+atrun info --versions @alice.bsky.social:ripgrep
+```
+
+Link explicitly to any record — useful for forks or cross-ecosystem ports:
 
 ```
 atrun publish --dist-url npm:my-fork \
-              --derived-from at://did:plc:original-author/dev.atrun.module/3mgxyz
+              --derived-from @bob.bsky.social:original-package
 ```
 
 Or suppress auto-linking:
@@ -223,6 +273,21 @@ Or suppress auto-linking:
 ```
 atrun publish --dist-url npm:new-package --no-derived-from
 ```
+
+## Addressing
+
+atrun accepts multiple address formats everywhere a record is referenced:
+
+| Format | Example |
+|--------|---------|
+| Shorthand | `@alice.bsky.social:cowsay` |
+| Shorthand with version | `@alice.bsky.social:cowsay@1.6.0` |
+| AT URI | `at://did:plc:abc123/dev.atrun.module/3mgxyz` |
+| XRPC URL | `https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=...` |
+| Bluesky post URL | `https://bsky.app/profile/alice.bsky.social/post/3mgxyz` |
+| Plain HTTPS (with `--unsigned`) | `https://example.com/record.json` |
+
+The `@handle:package` shorthand is the most human-friendly. It resolves to the latest version by default, or a specific version with `@version`.
 
 ## Supported ecosystems
 

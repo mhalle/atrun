@@ -90,6 +90,70 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         click.echo(f"https://bsky.app/profile/{handle}/post/{parts[2]}")
 
 
+@cli.command(name="list")
+@click.argument("target")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON array.")
+def list_cmd(target: str, as_json: bool):
+    """List packages or versions published by a user.
+
+    TARGET is either @handle (list all packages) or @handle:package
+    (list all versions of a package).
+
+    \b
+    Examples:
+      atrun list @alice.bsky.social
+      atrun list @alice.bsky.social:ripgrep
+      atrun list --json @alice.bsky.social
+    """
+    from .run import list_records
+
+    # Parse target: @handle or @handle:package
+    if not target.startswith("@"):
+        raise click.ClickException("Target must start with @ (e.g. @alice.bsky.social or @alice.bsky.social:package)")
+
+    target = target[1:]  # strip leading @
+    if ":" in target:
+        handle, package = target.split(":", 1)
+        # Strip @version if present
+        if "@" in package:
+            package = package.split("@")[0]
+    else:
+        handle = target
+        package = None
+
+    records = list_records(handle, package=package)
+
+    if not records:
+        if package:
+            raise click.ClickException(f"No records found for {package} by @{handle}")
+        raise click.ClickException(f"No records found by @{handle}")
+
+    if as_json:
+        click.echo(json.dumps(records, indent=2))
+        return
+
+    if package:
+        # Version list for a specific package
+        for rec in records:
+            ts = rec.get("timestamp", "")
+            ts_str = f"  ({ts})" if ts else ""
+            ver = rec.get("version", "")
+            ver_str = f"@{ver}" if ver else ""
+            click.echo(f"@{handle}:{package}{ver_str}{ts_str}")
+    else:
+        # Package list — show latest version of each package
+        seen: dict[str, dict] = {}
+        for rec in records:
+            pkg = rec["package"]
+            if pkg not in seen:
+                seen[pkg] = rec
+        for pkg, rec in seen.items():
+            eco = f" ({rec['ecosystem']})" if rec["ecosystem"] else ""
+            ver = rec.get("version", "")
+            ver_str = f"@{ver}" if ver else ""
+            click.echo(f"@{handle}:{pkg}{ver_str}{eco}")
+
+
 @cli.command()
 @click.argument("uri")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints. The record will have no cryptographic verification.")
@@ -122,9 +186,10 @@ def resolve(uri: str, unsigned: bool):
 @click.option("--raw", is_flag=True, help="Print the full raw AT Protocol record as returned by the PDS.")
 @click.option("--dist", "show_dist", is_flag=True, help="Print only the distribution artifact URL.")
 @click.option("--registry", is_flag=True, help="Fetch full metadata from the ecosystem's package registry (PyPI, npm, JSR) instead of showing record metadata.")
+@click.option("--versions", is_flag=True, help="Follow the derivedFrom chain to show version history.")
 @click.option("--social", is_flag=True, help="Show social context: publisher profile and post engagement (likes, reposts, replies).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, social: bool, unsigned: bool):
+def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, versions: bool, social: bool, unsigned: bool):
     """Show metadata for a published package record.
 
     By default, displays metadata stored in the record itself: package name,
@@ -158,6 +223,57 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, so
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
+
+    if versions:
+        from .run import fetch_record as _fetch
+
+        chain = []
+        current_at = at_info
+        current_record = record
+        seen = set()
+
+        while True:
+            version = current_record.get("version", "?")
+            uri_str = current_at.get("uri", "") if current_at else ""
+            ts = current_at.get("timestamp", "") if current_at else ""
+            handle = current_at.get("handle", "") if current_at else ""
+            cid = current_at.get("cid", "") if current_at else ""
+
+            entry = {"version": version, "uri": uri_str, "timestamp": ts}
+            if handle:
+                entry["handle"] = handle
+            if cid:
+                entry["cid"] = cid
+            chain.append(entry)
+
+            # Follow derivedFrom
+            derived = current_record.get("derivedFrom")
+            if not derived or not derived.get("uri"):
+                break
+            derived_uri = derived["uri"]
+            if derived_uri in seen:
+                break  # cycle detection
+            seen.add(derived_uri)
+
+            try:
+                result = _fetch(derived_uri)
+                current_at = result["at"]
+                current_record = result["content"]
+            except Exception:
+                chain.append({"version": "?", "uri": derived_uri, "error": "could not fetch"})
+                break
+
+        if as_json:
+            click.echo(json.dumps(chain, indent=2))
+        else:
+            for i, entry in enumerate(chain):
+                prefix = "* " if i == 0 else "  "
+                ts = f"  ({entry['timestamp']})" if entry.get("timestamp") else ""
+                handle = entry.get("handle", "")
+                ver = entry.get("version", "?")
+                shorthand = f"@{handle}:{package}@{ver}" if handle else f"{package}@{ver}"
+                click.echo(f"{prefix}{shorthand}{ts}")
+        return
 
     if raw:
         raw_output = {}

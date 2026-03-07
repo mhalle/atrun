@@ -63,9 +63,11 @@ Only the tools for ecosystems you plan to use are required:
 
 ## Quick start
 
+Most commands (`info`, `list`, `install`, `run`, `resolve`, `verify`, `fetch`) work without authentication. You only need to log in to publish.
+
 ### Authenticate
 
-Create an [app password](https://bsky.app/settings/app-passwords) on Bluesky, then:
+To publish packages, create an [app password](https://bsky.app/settings/app-passwords) on Bluesky, then:
 
 ```
 atrun login --handle alice.bsky.social

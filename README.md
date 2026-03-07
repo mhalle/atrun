@@ -31,19 +31,35 @@ Today, atrun reads and writes directly to PDS instances. Anyone can publish. Whe
 
 ## Install
 
+atrun requires [uv](https://docs.astral.sh/uv/) and Python 3.12+. Install uv first if you don't have it:
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then install atrun:
+
 ```
 uv tool install atrun
 ```
 
-### Prerequisites
+This installs `atrun` into an isolated environment and adds it to `~/.local/bin`. Make sure that directory is in your PATH:
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (for Python ecosystem)
-- [pnpm](https://pnpm.io/), [bun](https://bun.sh/), or [npm](https://www.npmjs.com/) (for Node.js ecosystem)
-- [cargo](https://doc.rust-lang.org/cargo/) (for Rust ecosystem)
-- [go](https://go.dev/) (for Go ecosystem)
+```
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-Only the tools for ecosystems you use are required.
+Add that line to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.) to make it permanent.
+
+### Ecosystem prerequisites
+
+Only the tools for ecosystems you plan to use are required:
+
+- **Python** — [uv](https://docs.astral.sh/uv/) (already installed above)
+- **Node.js** — [pnpm](https://pnpm.io/) (recommended), [bun](https://bun.sh/), or [npm](https://www.npmjs.com/). For pnpm, run `pnpm setup` after installing to configure the global bin directory.
+- **Rust** — [cargo](https://doc.rust-lang.org/cargo/) (via [rustup](https://rustup.rs/))
+- **Go** — [go](https://go.dev/dl/)
+- **Container** — [docker](https://docs.docker.com/get-docker/) or [crane](https://github.com/google/go-containerregistry/tree/main/cmd/crane)
 
 ## Quick start
 

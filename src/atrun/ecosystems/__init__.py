@@ -44,11 +44,11 @@ def get_ecosystem(name: str) -> ModuleType:
     return importlib.import_module(rel, package=__name__)
 
 
-def detect_ecosystem_from_resolved(resolved: list[dict], record: dict | None = None) -> str:
+def detect_ecosystem_from_artifacts(artifacts: list[dict], record: dict | None = None) -> str:
     """Detect the ecosystem from a record's packageType or URL patterns.
 
     If a record with a packageType is provided, looks it up first.
-    Otherwise checks the first resolved entry's URL against known patterns:
+    Otherwise checks the first artifacts entry's URL against known patterns:
       - crates.io -> 'rust'
       - registry.npmjs.org -> 'node'
       - .whl or files.pythonhosted.org -> 'python'
@@ -61,9 +61,9 @@ def detect_ecosystem_from_resolved(resolved: list[dict], record: dict | None = N
             eco = PACKAGE_TYPE_TO_ECOSYSTEM.get(pkg_type)
             if eco:
                 return eco
-    if not resolved:
+    if not artifacts:
         return "python"
-    url = resolved[0].get("url", "")
+    url = artifacts[0].get("url", "")
     return detect_ecosystem_from_url(url) or "python"
 
 

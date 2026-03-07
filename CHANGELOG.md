@@ -2,15 +2,31 @@
 
 ## 0.14.0
 
+**Breaking schema changes** — existing records on AT Protocol are incompatible.
+
+- Rename record field `resolved` → `artifacts` across the lexicon and codebase
+- Rename `depEntry` type to `artifact` in the lexicon
+- Rename artifact field `hash` → `digest` (aligns with OCI/SRI conventions)
+- Rename artifact field `source` → `ref` (pointer to artifact's own manifest record)
+- Remove all required fields from `artifact` — schema is permissive, implementations enforce
+- Only `createdAt` is required on the record itself (`artifacts` is optional)
+- Add optional `id` field on artifacts for opaque unique identifiers (DICOM UIDs, DOIs, purls)
+- Add optional `artifactType` field on artifacts (`wheel`, `sdist`, `tarball`, `crate`, `module`, `image`)
+- Add optional per-artifact `metadata` object for ecosystem-specific data
+- Python parser populates `artifactType` (`wheel`/`sdist`) and `requires-python` metadata
+- Node parser populates `artifactType` (`tarball`) and `engines` metadata
+- Container parser populates `artifactType` (`image`) and `platform` metadata from compose files
+- Rust parser populates `artifactType` (`crate`)
+- Go parser populates `artifactType` (`module`)
+- Rename `detect_ecosystem_from_resolved()` → `detect_ecosystem_from_artifacts()`
 - Separate generic manifest (`dev.atpub.manifest`) from package manager application
 - Rename collection `dev.atrun.module` → `dev.atpub.manifest`, `dev.atrun.yank` → `dev.atpub.yank`
 - Rename `depEntry` fields: `packageName` → `name`, `packageVersion` → `version`
-- Remove `ecosystem` union from manifest — ecosystem is now inferred from URL patterns in resolved entries
+- Remove `ecosystem` union from manifest — ecosystem is now inferred from URL patterns in artifact entries
 - Remove `build_ecosystem_value()` and `ECOSYSTEM_TYPE` from ecosystem modules
-- Add `detect_ecosystem_from_resolved()` for URL-based ecosystem detection at consume time
 - Add optional `packageType` field with open enum (`dev.atpub.defs#pythonPackage`, `#npmPackage`, `#rustCrate`, `#dataset`, `#document`, `#container`)
 - Add `tool` field for provenance (e.g. `atrun@0.14.0`)
-- Add optional `metadata` object for ecosystem-specific data in camelCase (e.g. `pythonVersion`, `engine`)
+- Add optional record-level `metadata` object for ecosystem-specific data in camelCase (e.g. `pythonVersion`, `engine`)
 - Add Go module ecosystem support: parse go.sum, install via `go install`, metadata from proxy.golang.org
 - Add `go:` dist URL shorthand (e.g. `go:github.com/junegunn/fzf`, `go:github.com/junegunn/fzf@v0.60.3`)
 - Auto-detect Go from go.sum content or proxy.golang.org URLs

@@ -45,6 +45,7 @@ def test_parse_lockfile_basic(go_sum_content):
     names = [e["name"] for e in entries]
     assert "golang.org/x/text" in names
     assert "golang.org/x/net" in names
+    assert all(e["artifactType"] == "module" for e in entries)
 
 
 def test_parse_lockfile_sorted(go_sum_content):
@@ -76,7 +77,7 @@ def test_parse_lockfile_empty():
 def test_generate_install_args():
     record = {
         "package": "golang.org/x/text",
-        "resolved": [{"name": "golang.org/x/text", "version": "v0.14.0"}],
+        "artifacts": [{"name": "golang.org/x/text", "version": "v0.14.0"}],
     }
     args = generate_install_args(record)
     assert args == ["go", "install", "golang.org/x/text@v0.14.0"]
@@ -85,13 +86,13 @@ def test_generate_install_args():
 def test_generate_run_args():
     record = {
         "package": "golang.org/x/text",
-        "resolved": [{"name": "golang.org/x/text", "version": "v0.14.0"}],
+        "artifacts": [{"name": "golang.org/x/text", "version": "v0.14.0"}],
     }
     args = generate_run_args(record)
     assert args == ["go", "run", "golang.org/x/text@v0.14.0"]
 
 
 def test_generate_install_args_missing():
-    record = {"package": "missing", "resolved": [{"name": "other", "version": "v1.0"}]}
+    record = {"package": "missing", "artifacts": [{"name": "other", "version": "v1.0"}]}
     with pytest.raises(SystemExit, match="not found"):
         generate_install_args(record)

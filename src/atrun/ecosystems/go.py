@@ -63,8 +63,9 @@ def parse_lockfile(content: str) -> list[dict]:
         entry: dict = {
             "name": module,
             "version": version,
-            "hash": _convert_h1_hash(hash_str),
+            "digest": _convert_h1_hash(hash_str),
             "url": _module_download_url(module, version),
+            "artifactType": "module",
         }
         entries.append(entry)
 
@@ -98,26 +99,26 @@ def build_metadata() -> dict:
     return {}
 
 
-def generate_requirements(resolved: list[dict]) -> str:
-    """Format resolved deps as module specs."""
+def generate_requirements(artifacts: list[dict]) -> str:
+    """Format artifacts as module specs."""
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         lines.append(f"{entry['name']}@{entry['version']}")
     return "\n".join(lines)
 
 
-def format_resolve_output(resolved: list[dict]) -> str:
-    """Format resolved deps for output."""
-    return generate_requirements(resolved)
+def format_resolve_output(artifacts: list[dict]) -> str:
+    """Format artifacts for output."""
+    return generate_requirements(artifacts)
 
 
 def generate_install_args(record: dict) -> list[str]:
     """Build go install command args."""
     package = record.get("package")
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    artifacts = record.get("artifacts", [])
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
     version = pkg_entry["version"]
     return ["go", "install", f"{package}@{version}"]
 
@@ -125,10 +126,10 @@ def generate_install_args(record: dict) -> list[str]:
 def generate_run_args(record: dict) -> list[str]:
     """Build args for running a Go module."""
     package = record.get("package")
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    artifacts = record.get("artifacts", [])
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
     version = pkg_entry["version"]
     return ["go", "run", f"{package}@{version}"]
 

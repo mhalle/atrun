@@ -134,17 +134,17 @@ def sample_manifest_record():
         "$type": "dev.atpub.manifest",
         "package": "cowsay",
         "version": "1.6.0",
-        "resolved": [
+        "artifacts": [
             {
                 "name": "cowsay",
                 "version": "1.6.0",
-                "hash": "sha512:0000000000000000",
+                "digest": "sha512:0000000000000000",
                 "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
-                "hash": "sha512:1111111111111111",
+                "digest": "sha512:1111111111111111",
                 "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
             },
         ],

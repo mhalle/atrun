@@ -24,12 +24,13 @@ def test_parse_lockfile_basic(cargo_lock_content):
     names = [e["name"] for e in entries]
     assert "ripgrep" in names
     assert "aho-corasick" in names
+    assert all(e["artifactType"] == "crate" for e in entries)
 
 
 def test_parse_lockfile_hash_prefix(cargo_lock_content):
     entries = parse_lockfile(cargo_lock_content)
     for e in entries:
-        assert e["hash"].startswith("sha256:")
+        assert e["digest"].startswith("sha256:")
 
 
 def test_parse_lockfile_skips_non_crates_io():
@@ -71,7 +72,7 @@ checksum = "aaaa"
 def test_generate_install_args():
     record = {
         "package": "ripgrep",
-        "resolved": [{"name": "ripgrep", "version": "14.1.0"}],
+        "artifacts": [{"name": "ripgrep", "version": "14.1.0"}],
     }
     args = generate_install_args(record)
     assert args == ["cargo", "install", "ripgrep@14.1.0"]
@@ -84,6 +85,6 @@ def test_generate_run_args():
 
 
 def test_generate_install_args_missing():
-    record = {"package": "missing", "resolved": [{"name": "other", "version": "1.0"}]}
+    record = {"package": "missing", "artifacts": [{"name": "other", "version": "1.0"}]}
     with pytest.raises(SystemExit, match="not found"):
         generate_install_args(record)

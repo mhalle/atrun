@@ -154,8 +154,8 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
         if m:
             ts = _decode_tid_timestamp(m.group(3))
 
-        from .ecosystems import detect_ecosystem_from_resolved
-        eco_name = detect_ecosystem_from_resolved(value.get("resolved", []), record=value)
+        from .ecosystems import detect_ecosystem_from_artifacts
+        eco_name = detect_ecosystem_from_artifacts(value.get("artifacts", []), record=value)
 
         entry = {
             "uri": rec["uri"],
@@ -428,24 +428,24 @@ def fetch_social_info(at_info: dict) -> dict | None:
     return result or None
 
 
-def generate_requirements(resolved: list[dict], record: dict | None = None) -> str:
+def generate_requirements(artifacts: list[dict], record: dict | None = None) -> str:
     """Generate dependency output in the ecosystem's native format.
 
     If a record is provided, detects the ecosystem and uses its format.
     Otherwise falls back to Python requirements.txt with hash pins.
     """
     if record is not None:
-        from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
-        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []), record=record)
+        from .ecosystems import detect_ecosystem_from_artifacts, get_ecosystem
+        eco_name = detect_ecosystem_from_artifacts(record.get("artifacts", []), record=record)
         eco_mod = get_ecosystem(eco_name)
-        return eco_mod.format_resolve_output(resolved)
+        return eco_mod.format_resolve_output(artifacts)
 
     # Legacy fallback: Python requirements.txt format
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         name = entry["name"]
         url = entry["url"]
-        hash_str = entry.get("hash", entry.get("sha256", ""))
+        hash_str = entry.get("digest", entry.get("sha256", ""))
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
         lines.append(f"{name} @ {url} --hash={hash_str}")
@@ -463,17 +463,17 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
     """
     import sys
 
-    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
+    from .ecosystems import detect_ecosystem_from_artifacts, get_ecosystem
 
     record = fetch_record(uri, unsigned=unsigned)["content"]
-    resolved = record.get("resolved", [])
-    if not resolved:
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
         raise SystemExit("Record has no resolved packages.")
 
     package = record.get("package")
     if not package:
         # For multi-image container records, suggest using docker compose directly
-        eco_name = detect_ecosystem_from_resolved(resolved, record=record)
+        eco_name = detect_ecosystem_from_artifacts(artifacts, record=record)
         if eco_name == "container":
             raise SystemExit(
                 "Multi-image container record has no main package. "
@@ -481,7 +481,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
             )
         raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
-    eco_name = detect_ecosystem_from_resolved(resolved, record=record)
+    eco_name = detect_ecosystem_from_artifacts(artifacts, record=record)
     eco_mod = get_ecosystem(eco_name)
 
     import os
@@ -489,8 +489,8 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
     if eco_name == "container":
         from .ecosystems.container import _build_image_ref, verify_digest as _verify_container
 
-        pkg_entry = next((e for e in resolved if e["name"] == package), resolved[0])
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_entry = next((e for e in artifacts if e["name"] == package), artifacts[0])
+        pkg_hash = pkg_entry.get("digest", "")
 
         if do_verify and pkg_hash:
             ref = f"{pkg_entry['name']}:{pkg_entry['version']}"
@@ -507,12 +507,12 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         os.execvp(cmd[0], cmd)
 
     if eco_name == "python":
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise SystemExit(f"Package '{package}' not found in resolved list.")
+            raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
         pkg_url = pkg_entry["url"]
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_hash = pkg_entry.get("digest", "")
 
         if do_verify and pkg_hash:
             from .verify import HashMismatchError, download_and_verify
@@ -530,11 +530,11 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         cmd = ["uvx", "--from", f"{package} @ {pkg_url}", package]
         os.execvp(cmd[0], cmd)
     elif eco_name == "node":
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise SystemExit(f"Package '{package}' not found in resolved list.")
+            raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_hash = pkg_entry.get("digest", "")
         verified_path = None
 
         if do_verify and pkg_hash:
@@ -562,9 +562,9 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
             cmd = ["pnpx", pkg_spec]
         os.execvp(cmd[0], cmd)
     elif eco_name == "rust":
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if do_verify and pkg_entry:
-            pkg_hash = pkg_entry.get("hash", "")
+            pkg_hash = pkg_entry.get("digest", "")
             if pkg_hash:
                 from .verify import HashMismatchError, verify_artifact
 

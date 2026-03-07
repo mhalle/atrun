@@ -67,8 +67,8 @@ def test_shorthand_re_without_version():
 
 
 def test_generate_requirements_with_record(sample_manifest_record):
-    resolved = sample_manifest_record["resolved"]
-    result = generate_requirements(resolved, record=sample_manifest_record)
+    artifacts = sample_manifest_record["artifacts"]
+    result = generate_requirements(artifacts, record=sample_manifest_record)
     assert "cowsay@1.6.0" in result
     assert "string-width@4.2.3" in result
 

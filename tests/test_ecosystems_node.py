@@ -122,6 +122,33 @@ def test_parse_lockfile_deduplicates():
     assert len(foo_entries) == 1
 
 
+def test_parse_lockfile_engines_metadata():
+    content = '''{
+      "lockfileVersion": 3,
+      "packages": {
+        "node_modules/foo": {
+          "version": "1.0.0",
+          "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+          "resolved": "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz",
+          "engines": {"node": ">=14"}
+        }
+      }
+    }'''
+    entries = parse_lockfile(content)
+    assert len(entries) == 1
+    assert entries[0]["metadata"] == {"node": ">=14"}
+
+
+def test_parse_lockfile_no_metadata_without_engines(package_lock_json_content):
+    entries = parse_lockfile(package_lock_json_content)
+    assert all("metadata" not in e for e in entries)
+
+
+def test_parse_lockfile_artifact_type(package_lock_json_content):
+    entries = parse_lockfile(package_lock_json_content)
+    assert all(e["artifactType"] == "tarball" for e in entries)
+
+
 # --- generate_requirements ---
 
 
@@ -142,11 +169,11 @@ def test_generate_requirements_format():
 def test_generate_install_args_uses_url(mock_check):
     record = {
         "package": "cowsay",
-        "resolved": [
+        "artifacts": [
             {
                 "name": "cowsay",
                 "version": "1.6.0",
-                "hash": "sha256:" + "ab" * 32,
+                "digest": "sha256:" + "ab" * 32,
                 "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
             },
         ],
@@ -159,18 +186,18 @@ def test_generate_install_args_uses_url(mock_check):
 def test_build_pnpm_lockfile():
     record = {
         "package": "cowsay",
-        "resolved": [
+        "artifacts": [
             {
                 "name": "cowsay",
                 "version": "1.6.0",
-                "hash": "sha256:" + "ab" * 32,
+                "digest": "sha256:" + "ab" * 32,
                 "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
                 "dependencies": ["string-width@4.2.3"],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
-                "hash": "sha256:" + "cd" * 32,
+                "digest": "sha256:" + "cd" * 32,
                 "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
             },
         ],
@@ -190,18 +217,18 @@ def _make_deps_record(package, version, hash_str, url):
     """Build a record with dependency data (triggers the --deps path)."""
     return {
         "package": package,
-        "resolved": [
+        "artifacts": [
             {
                 "name": package,
                 "version": version,
-                "hash": hash_str,
+                "digest": hash_str,
                 "url": url,
                 "dependencies": ["string-width@4.2.3"],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
-                "hash": "sha256:" + "cd" * 32,
+                "digest": "sha256:" + "cd" * 32,
                 "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
             },
         ],
@@ -279,18 +306,18 @@ def test_run_verified_install_no_hash_uses_raw_url(
     without download_and_verify."""
     record = {
         "package": "cowsay",
-        "resolved": [
+        "artifacts": [
             {
                 "name": "cowsay",
                 "version": "1.6.0",
-                "hash": "",
+                "digest": "",
                 "url": "https://example.com/cowsay-1.6.0.tgz",
                 "dependencies": ["string-width@4.2.3"],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
-                "hash": "sha256:" + "cd" * 32,
+                "digest": "sha256:" + "cd" * 32,
                 "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
             },
         ],

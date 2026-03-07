@@ -51,8 +51,9 @@ def parse_lockfile(content: str) -> list[dict]:
         entry: dict = {
             "name": name,
             "version": version,
-            "hash": f"sha256:{checksum}",
+            "digest": f"sha256:{checksum}",
             "url": _crate_download_url(name, version),
+            "artifactType": "crate",
         }
 
         deps = pkg.get("dependencies", [])
@@ -94,26 +95,26 @@ def build_metadata() -> dict:
     return {}
 
 
-def generate_requirements(resolved: list[dict]) -> str:
-    """Format resolved deps as crate specs."""
+def generate_requirements(artifacts: list[dict]) -> str:
+    """Format artifacts as crate specs."""
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         lines.append(f"{entry['name']}@{entry['version']}")
     return "\n".join(lines)
 
 
-def format_resolve_output(resolved: list[dict]) -> str:
-    """Format resolved deps for output."""
-    return generate_requirements(resolved)
+def format_resolve_output(artifacts: list[dict]) -> str:
+    """Format artifacts for output."""
+    return generate_requirements(artifacts)
 
 
 def generate_install_args(record: dict) -> list[str]:
     """Build cargo install command args."""
     package = record.get("package")
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    artifacts = record.get("artifacts", [])
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
     version = pkg_entry["version"]
     return ["cargo", "install", f"{package}@{version}"]
 

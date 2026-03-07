@@ -26,18 +26,28 @@ def parse_lockfile(content: str) -> list[dict]:
         if not name or not version:
             continue
 
+        # Collect per-artifact metadata
+        meta: dict[str, str] = {}
+        requires_python = pkg.get("requires-python")
+        if requires_python:
+            meta["requires-python"] = str(requires_python)
+
         wheels = pkg.get("wheels", [])
         if wheels:
             wheel = wheels[0]
             url = wheel.get("url")
             hash_str = _extract_hash(wheel.get("hashes", {}))
             if url and hash_str:
-                entries.append({
+                entry: dict = {
                     "name": name,
                     "version": version,
-                    "hash": hash_str,
+                    "digest": hash_str,
                     "url": url,
-                })
+                    "artifactType": "wheel",
+                }
+                if meta:
+                    entry["metadata"] = meta
+                entries.append(entry)
                 continue
 
         sdist = pkg.get("sdist")
@@ -45,12 +55,16 @@ def parse_lockfile(content: str) -> list[dict]:
             url = sdist.get("url")
             hash_str = _extract_hash(sdist.get("hashes", {}))
             if url and hash_str:
-                entries.append({
+                entry = {
                     "name": name,
                     "version": version,
-                    "hash": hash_str,
+                    "digest": hash_str,
                     "url": url,
-                })
+                    "artifactType": "sdist",
+                }
+                if meta:
+                    entry["metadata"] = meta
+                entries.append(entry)
 
     entries.sort(key=lambda e: e["name"])
     return entries
@@ -76,13 +90,13 @@ def build_metadata() -> dict:
     return {"pythonVersion": f"{sys.version_info.major}.{sys.version_info.minor}"}
 
 
-def generate_requirements(resolved: list[dict]) -> str:
-    """Generate a requirements.txt with --hash pins from resolved entries."""
+def generate_requirements(artifacts: list[dict]) -> str:
+    """Generate a requirements.txt with --hash pins from artifacts entries."""
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         name = entry["name"]
         url = entry["url"]
-        hash_str = entry.get("hash", "")
+        hash_str = entry.get("digest", "")
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
         lines.append(f"{name} @ {url} --hash={hash_str}")
@@ -92,10 +106,10 @@ def generate_requirements(resolved: list[dict]) -> str:
 def generate_install_args(record: dict) -> list[str]:
     """Build uv tool install command args."""
     package = record.get("package")
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    artifacts = record.get("artifacts", [])
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
     return [
         "uv", "tool", "install",
@@ -168,6 +182,6 @@ def extract_local_dist_metadata(path: "Path") -> dict:
     return _metadata_from_wheel_meta(meta)
 
 
-def format_resolve_output(resolved: list[dict]) -> str:
-    """Format resolved deps for output (requirements.txt format)."""
-    return generate_requirements(resolved)
+def format_resolve_output(artifacts: list[dict]) -> str:
+    """Format artifacts for output (requirements.txt format)."""
+    return generate_requirements(artifacts)

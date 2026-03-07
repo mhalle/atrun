@@ -356,10 +356,10 @@ def resolve(uri: str, unsigned: bool):
     from .run import fetch_record, generate_requirements
 
     record = fetch_record(uri, unsigned=unsigned)["content"]
-    resolved = record.get("resolved", [])
-    if not resolved:
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
         raise click.ClickException("Record has no resolved packages.")
-    click.echo(generate_requirements(resolved, record=record))
+    click.echo(generate_requirements(artifacts, record=record))
 
 
 @cli.command()
@@ -396,7 +396,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
       atrun info --social at://did:plc:abc123/dev.atpub.manifest/3mgxyz
       atrun info --registry at://did:plc:abc123/dev.atpub.manifest/3mgxyz
     """
-    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
+    from .ecosystems import detect_ecosystem_from_artifacts, get_ecosystem
     from .run import fetch_record, fetch_yanks
 
     result = fetch_record(uri, unsigned=unsigned)
@@ -477,21 +477,21 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         return
 
     if show_dist:
-        resolved = record.get("resolved", [])
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        artifacts = record.get("artifacts", [])
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+            raise click.ClickException(f"Package '{package}' not found in artifacts list.")
         click.echo(pkg_entry["url"])
         return
 
     if registry:
         # Fetch full metadata from ecosystem registry
-        resolved = record.get("resolved", [])
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        artifacts = record.get("artifacts", [])
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+            raise click.ClickException(f"Package '{package}' not found in artifacts list.")
 
-        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []), record=record)
+        eco_name = detect_ecosystem_from_artifacts(record.get("artifacts", []), record=record)
         eco_mod = get_ecosystem(eco_name)
         metadata = eco_mod.fetch_metadata(pkg_entry["url"])
 
@@ -529,7 +529,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         if field in record:
             content[field] = record[field]
 
-    resolved = record.get("resolved", [])
+    artifacts = record.get("artifacts", [])
 
     if "packageType" in record:
         content["packageType"] = record["packageType"]
@@ -539,9 +539,9 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         content["metadata"] = record["metadata"]
 
     # Include hash of the main package
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
-    if pkg_entry and "hash" in pkg_entry:
-        content["hash"] = pkg_entry["hash"]
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
+    if pkg_entry and "digest" in pkg_entry:
+        content["digest"] = pkg_entry["digest"]
 
     derived = record.get("derivedFrom")
     if derived:
@@ -550,7 +550,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
             derived = [derived]
         content["derivedFrom"] = [ref.get("uri", "") for ref in derived]
 
-    content["dependencies"] = len(resolved)
+    content["dependencies"] = len(artifacts)
 
     if yank_reason is not None:
         content["yanked"] = True
@@ -581,9 +581,9 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         click.echo(f"packageType: {content['packageType']}")
 
     # For package-less records (e.g. multi-image container), list resolved entries
-    if not package and resolved:
+    if not package and artifacts:
         click.echo("images:")
-        for entry in resolved:
+        for entry in artifacts:
             click.echo(f"  {entry['name']}:{entry.get('version', 'latest')}")
 
     if yank_reason is not None:
@@ -599,14 +599,14 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         click.echo(f"url: {content['url']}")
 
     # Integrity
-    if "hash" in content:
+    if "digest" in content:
         click.echo(f"hash: {content['hash']}")
     click.echo(f"dependencies: {content['dependencies']}")
     if "tool" in content:
         click.echo(f"tool: {content['tool']}")
 
     # Any remaining content fields not yet printed
-    shown = {"package", "version", "packageType", "tool", "metadata", "description", "license", "url", "hash", "dependencies", "derivedFrom"}
+    shown = {"package", "version", "packageType", "tool", "metadata", "description", "license", "url", "digest", "dependencies", "derivedFrom"}
     for key, value in content.items():
         if key not in shown:
             click.echo(f"{key}: {value}")
@@ -684,12 +684,12 @@ def verify(target: str, as_json: bool, unsigned: bool):
     if not package:
         raise click.ClickException("Record has no 'package' field.")
 
-    resolved = record.get("resolved", [])
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    artifacts = record.get("artifacts", [])
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise click.ClickException(f"Package '{package}' not found in resolved list.")
+        raise click.ClickException(f"Package '{package}' not found in artifacts list.")
 
-    pkg_hash = pkg_entry.get("hash", "")
+    pkg_hash = pkg_entry.get("digest", "")
     if not pkg_hash:
         raise click.ClickException(f"Package '{package}' has no hash in the record.")
 
@@ -718,7 +718,7 @@ def verify(target: str, as_json: bool, unsigned: bool):
                 "verified": True,
                 "package": package,
                 "url": url,
-                "hash": pkg_hash,
+                "digest": pkg_hash,
             }, indent=2))
         else:
             click.echo(f"Verified: {pkg_hash}")
@@ -746,7 +746,7 @@ def verify(target: str, as_json: bool, unsigned: bool):
             "verified": True,
             "package": package,
             "url": url,
-            "hash": pkg_hash,
+            "digest": pkg_hash,
         }, indent=2))
     else:
         click.echo(f"Verified: {pkg_hash}")
@@ -783,16 +783,16 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
     if not package:
         raise click.ClickException("Record has no 'package' field.")
 
-    resolved = record.get("resolved", [])
-    if not resolved:
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
         raise click.ClickException("Record has no resolved packages.")
 
     if deps:
-        entries = resolved
+        entries = artifacts
     else:
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+            raise click.ClickException(f"Package '{package}' not found in artifacts list.")
         entries = [pkg_entry]
 
     dest_dir = Path(directory)
@@ -809,7 +809,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
         for entry in entries:
             name = entry["name"]
             ref = entry["url"].removeprefix("oci://")
-            pkg_hash = entry.get("hash", "")
+            pkg_hash = entry.get("digest", "")
             safe_name = name.replace("/", "_")
             dest = dest_dir / f"{safe_name}.tar"
 
@@ -842,7 +842,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
         url = entry["url"]
         filename = url.rsplit("/", 1)[-1]
         dest = dest_dir / filename
-        expected_hash = entry.get("hash", "") or None if do_verify else None
+        expected_hash = entry.get("digest", "") or None if do_verify else None
 
         try:
             resp = client.get(url, follow_redirects=True)
@@ -915,7 +915,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
     if deps and no_deps:
         raise click.ClickException("Cannot use both --deps and --no-deps.")
 
-    from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
+    from .ecosystems import detect_ecosystem_from_artifacts, get_ecosystem
     from .run import fetch_record, fetch_yanks, generate_requirements
 
     result = fetch_record(uri, unsigned=unsigned)
@@ -924,8 +924,8 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
-    resolved = record.get("resolved", [])
-    if not resolved:
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
         raise click.ClickException("Record has no resolved packages.")
 
     # Check yank status
@@ -936,7 +936,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             reason_str = f": {reason}" if reason else ""
             raise click.ClickException(f"This version has been yanked{reason_str}. Use a different version or install via the dist URL directly.")
 
-    eco_name = detect_ecosystem_from_resolved(resolved, record=record)
+    eco_name = detect_ecosystem_from_artifacts(artifacts, record=record)
     eco_mod = get_ecosystem(eco_name)
 
     version = record.get("version", "")
@@ -946,9 +946,9 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
         from .ecosystems.container import verify_digest as _verify_container
 
         # Container: verify digest then docker pull each image
-        for entry in resolved:
+        for entry in artifacts:
             ref = f"{entry['name']}:{entry['version']}"
-            pkg_hash = entry.get("hash", "")
+            pkg_hash = entry.get("digest", "")
 
             if do_verify and pkg_hash:
                 click.echo(f"Verifying {entry['name']}...", err=True)
@@ -967,11 +967,11 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
     if eco_name == "python":
         # Python: use uv tool install with requirements file
-        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
-            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+            raise click.ClickException(f"Package '{package}' not found in artifacts list.")
 
-        requirements = generate_requirements(resolved, record=record)
+        requirements = generate_requirements(artifacts, record=record)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="atrun-", delete=False) as f:
             f.write(requirements)
@@ -980,7 +980,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
         # Download and verify main package hash, then use file:// URL
         verified_path = None
         pkg_url = pkg_entry["url"]
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_hash = pkg_entry.get("digest", "")
 
         if do_verify and pkg_hash:
             from .verify import HashMismatchError, download_and_verify
@@ -1014,8 +1014,8 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
     elif eco_name in ("rust", "go"):
         # Rust: verify artifact hash before cargo install (Go: skip, h1: tree hashes)
         if eco_name == "rust" and do_verify:
-            pkg_entry = next((e for e in resolved if e["name"] == package), None)
-            pkg_hash = pkg_entry.get("hash", "") if pkg_entry else ""
+            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
+            pkg_hash = pkg_entry.get("digest", "") if pkg_entry else ""
             if pkg_hash:
                 from .verify import HashMismatchError, verify_artifact
 
@@ -1039,7 +1039,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
         subprocess.run(cmd, check=True, env=env)
     else:
         # Node: determine whether to use verified install
-        has_dep_info = any(e.get("dependencies") for e in resolved)
+        has_dep_info = any(e.get("dependencies") for e in artifacts)
 
         if deps and not has_dep_info:
             raise click.ClickException("--deps requested but record has no dependency graph.")
@@ -1057,12 +1057,12 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
                 click.echo(shlex.join(result))
         else:
             # Direct install — verify hash then use local tarball
-            pkg_entry = next((e for e in resolved if e["name"] == package), None)
+            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
             verified_path = None
             pkg_spec = pkg_entry["url"] if pkg_entry else package
 
             if do_verify and pkg_entry:
-                pkg_hash = pkg_entry.get("hash", "")
+                pkg_hash = pkg_entry.get("digest", "")
                 if pkg_hash:
                     from .verify import HashMismatchError, download_and_verify
 

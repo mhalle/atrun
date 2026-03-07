@@ -20,9 +20,9 @@ def test_cli_help():
 
 def _make_record(package, version, hash_str, url, extra_resolved=None):
     """Helper to build a fetch_record-style return value."""
-    resolved = [{"name": package, "version": version, "hash": hash_str, "url": url}]
+    artifacts = [{"name": package, "version": version, "digest": hash_str, "url": url}]
     if extra_resolved:
-        resolved.extend(extra_resolved)
+        artifacts.extend(extra_resolved)
     return {
         "at": {
             "uri": f"at://did:plc:abc/dev.atpub.manifest/3mgxyz",
@@ -34,7 +34,7 @@ def _make_record(package, version, hash_str, url, extra_resolved=None):
             "$type": "dev.atpub.manifest",
             "package": package,
             "version": version,
-            "resolved": resolved,
+            "artifacts": artifacts,
         },
     }
 
@@ -153,10 +153,10 @@ def test_install_dry_run_node_deps_shows_steps(mock_yanks, mock_fetch):
     record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
     record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
     # Add dependency data to trigger the --deps path
-    record["content"]["resolved"][0]["dependencies"] = ["string-width@4.2.3"]
-    record["content"]["resolved"].append({
+    record["content"]["artifacts"][0]["dependencies"] = ["string-width@4.2.3"]
+    record["content"]["artifacts"].append({
         "name": "string-width", "version": "4.2.3",
-        "hash": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        "digest": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
     })
     mock_fetch.return_value = record
 
@@ -178,10 +178,10 @@ def test_install_dry_run_node_deps_no_verify_skips_hash(mock_yanks, mock_fetch):
     url = "https://github.com/example/cowsay/releases/download/v1.6.0/cowsay-1.6.0.tgz"
     record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
     record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
-    record["content"]["resolved"][0]["dependencies"] = ["string-width@4.2.3"]
-    record["content"]["resolved"].append({
+    record["content"]["artifacts"][0]["dependencies"] = ["string-width@4.2.3"]
+    record["content"]["artifacts"].append({
         "name": "string-width", "version": "4.2.3",
-        "hash": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        "digest": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
     })
     mock_fetch.return_value = record
 
@@ -232,7 +232,7 @@ def test_fetch_with_deps(mock_client_cls, mock_fetch, tmp_path):
         "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
         extra_resolved=[{
             "name": "string-width", "version": "4.2.3",
-            "hash": f"sha256:{digest}",
+            "digest": f"sha256:{digest}",
             "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
         }],
     )
@@ -284,7 +284,7 @@ def test_publish_dry_run(mock_build, mock_fetch):
         "$type": "dev.atpub.manifest",
         "package": "cowsay",
         "version": "1.6.0",
-        "resolved": [],
+        "artifacts": [],
         "createdAt": "2024-01-01T00:00:00Z",
     }
 

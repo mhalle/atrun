@@ -125,11 +125,22 @@ def parse_lockfile(content: str) -> list[dict]:
                 entry = {
                     "name": name,
                     "version": version,
-                    "hash": hash_str,
+                    "digest": hash_str,
                     "url": resolved_url,
+                    "artifactType": "tarball",
                 }
                 if deps:
                     entry["dependencies"] = deps
+
+                # Collect per-artifact metadata
+                meta: dict[str, str] = {}
+                engines = info.get("engines")
+                if isinstance(engines, dict):
+                    for eng_name, eng_ver in engines.items():
+                        meta[eng_name] = str(eng_ver)
+                if meta:
+                    entry["metadata"] = meta
+
                 entries.append(entry)
 
     entries.sort(key=lambda e: e["name"])
@@ -153,10 +164,10 @@ def build_metadata() -> dict:
     return {"engine": "node"}
 
 
-def generate_requirements(resolved: list[dict]) -> str:
-    """Format resolved deps as package specs."""
+def generate_requirements(artifacts: list[dict]) -> str:
+    """Format artifacts as package specs."""
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         lines.append(f"{entry['name']}@{entry['version']}")
     return "\n".join(lines)
 
@@ -201,11 +212,11 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     """Build global install command args for the chosen engine."""
     _check_engine(engine)
     package = record.get("package")
-    resolved = record.get("resolved", [])
+    artifacts = record.get("artifacts", [])
 
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
     return [engine, "install", "-g", pkg_entry["url"]]
 
@@ -258,22 +269,22 @@ def fetch_metadata(url: str) -> dict:
 
 
 def _build_pnpm_lockfile(record: dict) -> str:
-    """Reconstruct a pnpm-lock.yaml from the record's resolved entries."""
+    """Reconstruct a pnpm-lock.yaml from the record's artifacts entries."""
     import yaml
 
     package = record["package"]
-    resolved = record["resolved"]
+    artifacts = record["artifacts"]
 
-    pkg_entry = next(e for e in resolved if e["name"] == package)
+    pkg_entry = next(e for e in artifacts if e["name"] == package)
     version = pkg_entry["version"]
 
     # Build packages section (integrity) and snapshots section (deps)
     packages = {}
     snapshots = {}
 
-    for entry in resolved:
+    for entry in artifacts:
         key = f"{entry['name']}@{entry['version']}"
-        sri = _hex_to_sri(entry["hash"])
+        sri = _hex_to_sri(entry["digest"])
 
         pkg_info: dict = {"resolution": {"integrity": sri}}
         if entry["name"] == package:
@@ -326,15 +337,15 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
     import click
 
     package = record.get("package")
-    resolved = record.get("resolved", [])
+    artifacts = record.get("artifacts", [])
 
-    pkg_entry = next((e for e in resolved if e["name"] == package), None)
+    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
     if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in resolved list.")
+        raise SystemExit(f"Package '{package}' not found in artifacts list.")
     version = pkg_entry["version"]
 
     # Check if record has dependency info for frozen lockfile install
-    has_deps = any(e.get("dependencies") for e in resolved)
+    has_deps = any(e.get("dependencies") for e in artifacts)
 
     if not has_deps:
         # Fallback: direct install without lockfile verification
@@ -348,7 +359,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
     if dry_run:
         import shlex
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_hash = pkg_entry.get("digest", "")
         click.echo(shlex.join(["pnpm", "install", "--frozen-lockfile"]))
         if do_verify and pkg_hash:
             click.echo(f"# download and verify hash: {pkg_hash}")
@@ -375,18 +386,18 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         (tmpdir_path / "pnpm-lock.yaml").write_text(lockfile_content)
 
         # Install with frozen lockfile — pnpm verifies all integrity hashes
-        click.echo(f"Installing with integrity verification ({len(resolved)} packages)...")
+        click.echo(f"Installing with integrity verification ({len(artifacts)} packages)...")
         subprocess.run(
             ["pnpm", "install", "--frozen-lockfile"],
             cwd=tmpdir_path,
             check=True,
         )
-        click.echo(f"Verified and installed {len(resolved)} packages")
+        click.echo(f"Verified and installed {len(artifacts)} packages")
 
         # Verify the main package artifact from its manifest URL before global install.
         # The frozen-lockfile step verifies registry integrity, but pkg_entry["url"]
         # may point outside the registry (GitHub tarball, mirror, etc.).
-        pkg_hash = pkg_entry.get("hash", "")
+        pkg_hash = pkg_entry.get("digest", "")
         install_spec = pkg_entry["url"]
         verified_path = None
 
@@ -458,6 +469,6 @@ def extract_dist_metadata(url: str) -> dict:
     return result
 
 
-def format_resolve_output(resolved: list[dict]) -> str:
-    """Format resolved deps for output."""
-    return generate_requirements(resolved)
+def format_resolve_output(artifacts: list[dict]) -> str:
+    """Format artifacts for output."""
+    return generate_requirements(artifacts)

@@ -69,7 +69,7 @@ def _parse_image_name(ref: str) -> dict:
 def _build_image_ref(entry: dict) -> str:
     """Build a digest-pinned image reference from a resolved entry."""
     name = entry["name"]
-    hash_str = entry.get("hash", "")
+    hash_str = entry.get("digest", "")
     if hash_str.startswith("sha256:"):
         return f"{name}@{hash_str}"
     return f"{name}:{entry.get('version', 'latest')}"
@@ -139,12 +139,17 @@ def parse_lockfile(content: str) -> list[dict]:
                 name = parsed["name"]
                 tag = parsed["tag"] or "latest"
                 digest = parsed.get("digest") or _resolve_digest(f"{name}:{tag}")
-                entries.append({
+                entry: dict = {
                     "name": name,
                     "version": tag,
-                    "hash": digest,
+                    "digest": digest,
                     "url": _build_oci_url(name, tag),
-                })
+                    "artifactType": "image",
+                }
+                platform = svc.get("platform")
+                if platform:
+                    entry["metadata"] = {"platform": platform}
+                entries.append(entry)
             entries.sort(key=lambda e: e["name"])
             return entries
     except Exception:
@@ -162,8 +167,9 @@ def parse_lockfile(content: str) -> list[dict]:
         entries.append({
             "name": name,
             "version": tag,
-            "hash": digest,
+            "digest": digest,
             "url": _build_oci_url(name, tag),
+            "artifactType": "image",
         })
 
     entries.sort(key=lambda e: e["name"])
@@ -189,23 +195,23 @@ def build_metadata() -> dict:
 
 def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
     """Build docker pull command args for a record's images."""
-    resolved = record.get("resolved", [])
-    if not resolved:
-        raise SystemExit("No resolved images in record.")
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
+        raise SystemExit("No artifacts in record.")
     # Pull the main package image by digest
     package = record.get("package")
-    entry = next((e for e in resolved if e["name"] == package), resolved[0])
+    entry = next((e for e in artifacts if e["name"] == package), artifacts[0])
     ref = _build_image_ref(entry)
     return [engine, "pull", ref]
 
 
 def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
     """Build docker run command args."""
-    resolved = record.get("resolved", [])
-    if not resolved:
-        raise SystemExit("No resolved images in record.")
+    artifacts = record.get("artifacts", [])
+    if not artifacts:
+        raise SystemExit("No artifacts in record.")
     package = record.get("package")
-    entry = next((e for e in resolved if e["name"] == package), resolved[0])
+    entry = next((e for e in artifacts if e["name"] == package), artifacts[0])
     ref = _build_image_ref(entry)
     return [engine, "run", "--rm", ref]
 
@@ -263,9 +269,9 @@ def verify_digest(image_ref: str, expected_hash: str, engine: str = DEFAULT_ENGI
     return True
 
 
-def format_resolve_output(resolved: list[dict]) -> str:
-    """Format resolved images for output."""
+def format_resolve_output(artifacts: list[dict]) -> str:
+    """Format artifacts for output."""
     lines = []
-    for entry in resolved:
+    for entry in artifacts:
         lines.append(f"{entry['name']}:{entry['version']}")
     return "\n".join(lines)

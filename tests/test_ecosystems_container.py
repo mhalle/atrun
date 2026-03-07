@@ -65,12 +65,12 @@ def test_parse_digest_ref():
 
 
 def test_build_image_ref_with_hash():
-    entry = {"name": "ghcr.io/user/app", "version": "1.0.0", "hash": "sha256:abc123"}
+    entry = {"name": "ghcr.io/user/app", "version": "1.0.0", "digest": "sha256:abc123"}
     assert _build_image_ref(entry) == "ghcr.io/user/app@sha256:abc123"
 
 
 def test_build_image_ref_without_hash():
-    entry = {"name": "ghcr.io/user/app", "version": "1.0.0", "hash": ""}
+    entry = {"name": "ghcr.io/user/app", "version": "1.0.0", "digest": ""}
     assert _build_image_ref(entry) == "ghcr.io/user/app:1.0.0"
 
 
@@ -149,14 +149,42 @@ nginx:1.25
     assert entries[1]["name"] == "ghcr.io/user/api"
 
 
+def test_parse_lockfile_artifact_type():
+    content = """\
+services:
+  web:
+    image: ghcr.io/user/app:1.0.0
+"""
+    with patch("atrun.ecosystems.container._resolve_digest", return_value="sha256:abc"):
+        entries = parse_lockfile(content)
+    assert entries[0]["artifactType"] == "image"
+
+
+def test_parse_lockfile_compose_platform_metadata():
+    content = """\
+services:
+  web:
+    image: ghcr.io/user/app:1.0.0
+    platform: linux/amd64
+  db:
+    image: postgres:16
+"""
+    with patch("atrun.ecosystems.container._resolve_digest", return_value="sha256:abc"):
+        entries = parse_lockfile(content)
+    web = next(e for e in entries if e["name"] == "ghcr.io/user/app")
+    db = next(e for e in entries if e["name"] == "docker.io/library/postgres")
+    assert web["metadata"] == {"platform": "linux/amd64"}
+    assert "metadata" not in db
+
+
 # --- generate_install_args ---
 
 
 def test_generate_install_args():
     record = {
         "package": "ghcr.io/user/app",
-        "resolved": [
-            {"name": "ghcr.io/user/app", "version": "1.0.0", "hash": "sha256:abc123"},
+        "artifacts": [
+            {"name": "ghcr.io/user/app", "version": "1.0.0", "digest": "sha256:abc123"},
         ],
     }
     args = generate_install_args(record)
@@ -166,8 +194,8 @@ def test_generate_install_args():
 def test_generate_install_args_crane():
     record = {
         "package": "ghcr.io/user/app",
-        "resolved": [
-            {"name": "ghcr.io/user/app", "version": "1.0.0", "hash": "sha256:abc123"},
+        "artifacts": [
+            {"name": "ghcr.io/user/app", "version": "1.0.0", "digest": "sha256:abc123"},
         ],
     }
     args = generate_install_args(record, engine="crane")
@@ -180,8 +208,8 @@ def test_generate_install_args_crane():
 def test_generate_run_args():
     record = {
         "package": "ghcr.io/user/app",
-        "resolved": [
-            {"name": "ghcr.io/user/app", "version": "1.0.0", "hash": "sha256:abc123"},
+        "artifacts": [
+            {"name": "ghcr.io/user/app", "version": "1.0.0", "digest": "sha256:abc123"},
         ],
     }
     args = generate_run_args(record)

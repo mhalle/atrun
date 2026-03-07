@@ -338,7 +338,7 @@ def build_record(
             entries.append({
                 "name": name,
                 "version": version,
-                "hash": f"sha256:{sha256}",
+                "digest": f"sha256:{sha256}",
                 "url": dist_url,
             })
             entries.sort(key=lambda e: e["name"])
@@ -360,7 +360,7 @@ def build_record(
     record: dict = {
         "$type": COLLECTION,
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "resolved": entries,
+        "artifacts": entries,
     }
     if package_name:
         record["package"] = package_name

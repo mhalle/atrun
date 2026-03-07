@@ -81,6 +81,8 @@ atrun publish --dist-url crate:ripgrep              # latest crate
 atrun publish --dist-url crate:ripgrep@14.1.1       # specific version
 atrun publish --dist-url go:github.com/junegunn/fzf            # latest Go module
 atrun publish --dist-url go:github.com/junegunn/fzf@v0.60.3    # specific version
+atrun publish --dist-url docker:ghcr.io/user/app:1.0.0         # container image
+atrun publish --dist-url docker:nginx:1.25                      # Docker Hub image
 ```
 
 With a Bluesky post:
@@ -179,7 +181,7 @@ atrun info @alice.bsky.social:ripgrep
 ```
 package: ripgrep
 version: 15.1.0
-ecosystem: rust
+packageType: dev.atpub.defs#rustCrate
 description: ripgrep is a line-oriented search tool...
 license: Unlicense OR MIT
 url: https://github.com/BurntSushi/ripgrep
@@ -241,6 +243,24 @@ Print dependencies in the ecosystem's native format:
 
 ```
 atrun resolve @alice.bsky.social:mypackage
+```
+
+### Verify an artifact
+
+Check the digest of a published artifact without installing:
+
+```
+atrun verify @alice.bsky.social:ripgrep
+```
+
+### Fetch artifacts
+
+Download artifacts to a local directory:
+
+```
+atrun fetch @alice.bsky.social:mypackage
+atrun fetch --deps @alice.bsky.social:mypackage       # include all dependencies
+atrun fetch --dir ./downloads @alice.bsky.social:mypackage
 ```
 
 ### Run a package

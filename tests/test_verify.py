@@ -122,3 +122,48 @@ def test_verify_artifact_mismatch(mock_get):
 
     with pytest.raises(HashMismatchError):
         verify_artifact("https://example.com/pkg", "sha256:0000000000000000")
+
+
+# --- download_to ---
+
+
+@patch("atrun.verify.httpx.get")
+def test_download_to_with_hash(mock_get, tmp_path):
+    from atrun.verify import download_to
+
+    data = b"artifact bytes"
+    digest = hashlib.sha256(data).hexdigest()
+
+    from tests.conftest import mock_response
+    mock_get.return_value = mock_response(content=data)
+
+    dest = tmp_path / "pkg-1.0.tgz"
+    result = download_to("https://example.com/pkg-1.0.tgz", dest, f"sha256:{digest}")
+    assert result == dest
+    assert dest.read_bytes() == data
+
+
+@patch("atrun.verify.httpx.get")
+def test_download_to_hash_mismatch_no_file(mock_get, tmp_path):
+    from atrun.verify import download_to
+
+    from tests.conftest import mock_response
+    mock_get.return_value = mock_response(content=b"wrong content")
+
+    dest = tmp_path / "pkg.tgz"
+    with pytest.raises(HashMismatchError):
+        download_to("https://example.com/pkg.tgz", dest, "sha256:" + "00" * 32)
+    assert not dest.exists()
+
+
+@patch("atrun.verify.httpx.get")
+def test_download_to_no_hash(mock_get, tmp_path):
+    from atrun.verify import download_to
+
+    data = b"some content"
+    from tests.conftest import mock_response
+    mock_get.return_value = mock_response(content=data)
+
+    dest = tmp_path / "pkg.tgz"
+    download_to("https://example.com/pkg.tgz", dest)
+    assert dest.read_bytes() == data

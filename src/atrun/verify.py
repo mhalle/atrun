@@ -92,6 +92,29 @@ def download_and_verify(url: str, expected_hash: str) -> Path:
     return Path(tmp.name)
 
 
+def download_to(url: str, dest: Path, expected_hash: str | None = None) -> Path:
+    """Download an artifact to a specific path, optionally verifying its hash.
+
+    If expected_hash is provided (in "algo:hex" format), verifies the hash
+    and raises HashMismatchError on mismatch. The file is not written if
+    verification fails.
+
+    Returns the destination path.
+    """
+    resp = httpx.get(url, follow_redirects=True)
+    resp.raise_for_status()
+
+    if expected_hash:
+        algo, expected = _parse_hash(expected_hash)
+        actual = hash_bytes(resp.content, algo)
+        if actual != expected:
+            raise HashMismatchError(url, f"{algo}:{expected}", f"{algo}:{actual}")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(resp.content)
+    return dest
+
+
 def verify_artifact(url: str, expected_hash: str) -> None:
     """Download an artifact to memory, verify its hash, and discard.
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -192,6 +192,89 @@ def test_install_dry_run_node_deps_no_verify_skips_hash(mock_yanks, mock_fetch):
     assert any("pnpm install --frozen-lockfile" in l for l in lines)
     assert not any("verify" in l.lower() for l in lines)
     assert any("install -g" in l and url in l for l in lines)
+
+
+def _mock_httpx_client(data):
+    """Create a mock httpx.Client context manager whose get() returns data."""
+    from tests.conftest import mock_response
+    client = MagicMock()
+    client.get.return_value = mock_response(content=data)
+    client.__enter__ = lambda s: client
+    client.__exit__ = lambda s, *a: None
+    return client
+
+
+@patch("atrun.run.fetch_record")
+@patch("atrun.cli.httpx.Client")
+def test_fetch_main_artifact(mock_client_cls, mock_fetch, tmp_path):
+    data = b"tarball content"
+    digest = hashlib.sha256(data).hexdigest()
+    mock_fetch.return_value = _make_record(
+        "cowsay", "1.6.0", f"sha256:{digest}",
+        "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+    )
+    mock_client_cls.return_value = _mock_httpx_client(data)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["fetch", "-d", str(tmp_path), "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
+    assert result.exit_code == 0
+    assert (tmp_path / "cowsay-1.6.0.tgz").exists()
+    assert (tmp_path / "cowsay-1.6.0.tgz").read_bytes() == data
+
+
+@patch("atrun.run.fetch_record")
+@patch("atrun.cli.httpx.Client")
+def test_fetch_with_deps(mock_client_cls, mock_fetch, tmp_path):
+    data = b"tarball content"
+    digest = hashlib.sha256(data).hexdigest()
+    record = _make_record(
+        "cowsay", "1.6.0", f"sha256:{digest}",
+        "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+        extra_resolved=[{
+            "name": "string-width", "version": "4.2.3",
+            "hash": f"sha256:{digest}",
+            "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        }],
+    )
+    mock_fetch.return_value = record
+    mock_client_cls.return_value = _mock_httpx_client(data)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["fetch", "--deps", "-d", str(tmp_path), "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
+    assert result.exit_code == 0
+    assert (tmp_path / "cowsay-1.6.0.tgz").exists()
+    assert (tmp_path / "string-width-4.2.3.tgz").exists()
+
+
+@patch("atrun.run.fetch_record")
+@patch("atrun.cli.httpx.Client")
+def test_fetch_hash_mismatch_fails(mock_client_cls, mock_fetch, tmp_path):
+    mock_fetch.return_value = _make_record(
+        "cowsay", "1.6.0", "sha256:" + "00" * 32,
+        "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+    )
+    mock_client_cls.return_value = _mock_httpx_client(b"wrong content")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["fetch", "-d", str(tmp_path), "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
+    assert result.exit_code == 1
+    assert not (tmp_path / "cowsay-1.6.0.tgz").exists()
+
+
+@patch("atrun.run.fetch_record")
+@patch("atrun.cli.httpx.Client")
+def test_fetch_no_verify(mock_client_cls, mock_fetch, tmp_path):
+    data = b"content"
+    mock_fetch.return_value = _make_record(
+        "cowsay", "1.6.0", "sha256:" + "00" * 32,
+        "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+    )
+    mock_client_cls.return_value = _mock_httpx_client(data)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["fetch", "--no-verify", "-d", str(tmp_path), "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
+    assert result.exit_code == 0
+    assert (tmp_path / "cowsay-1.6.0.tgz").exists()
 
 
 @patch("atrun.run.fetch_record")

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import click
+import httpx
 
 
 @click.group()
@@ -703,6 +704,94 @@ def verify(target: str, as_json: bool, unsigned: bool):
         }, indent=2))
     else:
         click.echo(f"Verified: {pkg_hash}")
+
+
+@cli.command()
+@click.argument("uri")
+@click.option("-d", "--directory", type=click.Path(), default=".", help="Directory to save artifacts to (default: current directory).")
+@click.option("--deps/--no-deps", default=False, help="Also fetch all dependency artifacts (default: main package only).")
+@click.option("--verify/--no-verify", "do_verify", default=True, help="Verify artifact hashes against the record (default: --verify).")
+@click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
+def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool):
+    """Download and verify artifacts from an AT Protocol record.
+
+    Fetches the main package artifact (or all dependencies with --deps),
+    verifies hashes against the record, and saves to the target directory.
+    Dependencies are downloaded in parallel.
+
+    \b
+    Examples:
+      atrun fetch @alice.bsky.social:cowsay
+      atrun fetch --deps @alice.bsky.social:cowsay
+      atrun fetch -d ./artifacts @alice.bsky.social:cowsay
+      atrun fetch --deps --no-verify @alice.bsky.social:cowsay
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from .run import fetch_record
+    from .verify import HashMismatchError, _parse_hash, hash_bytes
+
+    result = fetch_record(uri, unsigned=unsigned)
+    record = result["content"]
+    package = record.get("package")
+    if not package:
+        raise click.ClickException("Record has no 'package' field.")
+
+    resolved = record.get("resolved", [])
+    if not resolved:
+        raise click.ClickException("Record has no resolved packages.")
+
+    if deps:
+        entries = resolved
+    else:
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        if not pkg_entry:
+            raise click.ClickException(f"Package '{package}' not found in resolved list.")
+        entries = [pkg_entry]
+
+    dest_dir = Path(directory)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    click.echo(f"Fetching {len(entries)} artifact{'s' if len(entries) != 1 else ''} to {dest_dir}/", err=True)
+
+    def _fetch_one(client: httpx.Client, entry: dict) -> tuple[str, Path | None, str | None]:
+        name = entry["name"]
+        url = entry["url"]
+        filename = url.rsplit("/", 1)[-1]
+        dest = dest_dir / filename
+        expected_hash = entry.get("hash", "") or None if do_verify else None
+
+        try:
+            resp = client.get(url, follow_redirects=True)
+            resp.raise_for_status()
+
+            if expected_hash:
+                algo, expected = _parse_hash(expected_hash)
+                actual = hash_bytes(resp.content, algo)
+                if actual != expected:
+                    raise HashMismatchError(url, f"{algo}:{expected}", f"{algo}:{actual}")
+
+            dest.write_bytes(resp.content)
+            return name, dest, None
+        except HashMismatchError as exc:
+            return name, None, str(exc)
+        except Exception as exc:
+            return name, None, f"{name}: {exc}"
+
+    failed = []
+    with httpx.Client() as client:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_fetch_one, client, e): e for e in entries}
+            for future in as_completed(futures):
+                name, dest, error = future.result()
+                if error:
+                    click.echo(f"FAILED {name}: {error}", err=True)
+                    failed.append(name)
+                else:
+                    click.echo(f"{dest}")
+
+    if failed:
+        raise SystemExit(f"{len(failed)} artifact(s) failed verification")
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})

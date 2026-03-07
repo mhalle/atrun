@@ -18,6 +18,9 @@ def login(handle: str, app_password: str) -> dict:
 
     Returns the session dict and saves it to disk.
     """
+    handle = handle.strip().lstrip("@")
+    app_password = app_password.strip()
+
     resp = httpx.post(
         "https://bsky.social/xrpc/com.atproto.server.createSession",
         json={"identifier": handle, "password": app_password},

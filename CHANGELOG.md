@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0
+
+- Add Node.js (npm) and Deno ecosystem support
+- New `ecosystems` subpackage with registry, detection, and per-ecosystem modules
+- Parse package-lock.json (Node) and deno.lock v4/v5 (Deno) lockfiles
+- Auto-detect ecosystem from lockfile content or dist URL
+- Add `denoEcosystem` to lexicon with `runtime` and `permissions` fields
+- Add `dependencies` array to `depEntry` for dependency graph storage
+- Add `version`, `description`, `license`, and `url` metadata fields to record
+- Extract metadata from dist artifacts at publish time (wheel, npm tarball, JSR)
+- Add `--ecosystem` option to publish (python/node/deno, auto-detected if omitted)
+- Add `--permission` option to publish for Deno permissions
+- Add `--deps`/`--no-deps` flags to publish and install
+- Publish with `--no-deps --dist-url` requires no lockfile
+- Verified installs via frozen lockfiles (pnpm for Node, deno --frozen for Deno)
+- Install auto-uses frozen lockfile verification when record has dependency graph
+- `info` shows record metadata by default; `--registry` fetches from ecosystem registry
+- Strip leading `@` and whitespace from handle on login
+- Add `pyyaml` dependency (for pnpm lockfile reconstruction)
+
 ## 0.4.0
 
 - Switch from parsing `uv.lock` (private format) to `pylock.toml` via `uv export` (PEP 751)

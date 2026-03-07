@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 
 from .auth import load_session, refresh_session
-from .lockfile import export_pylock, parse_pylock
+from .ecosystems import detect_ecosystem_from_lockfile, detect_ecosystem_from_url, get_ecosystem
 
 def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -65,39 +65,84 @@ def build_record(
     lockfile: str | None = None,
     dist_file: Path | None = None,
     dist_url: str | None = None,
+    ecosystem: str | None = None,
+    permissions: list[str] | None = None,
+    strip_deps: bool = False,
 ) -> dict:
     """Build the AT Protocol record without publishing it.
 
-    lockfile: pylock.toml content as string. If None, runs uv export.
+    lockfile: lockfile content as string. If None, uses ecosystem's export.
+    ecosystem: "python", "node", or "deno". Auto-detected if None.
+    permissions: Deno permissions list (only used for deno ecosystem).
+    strip_deps: If True, remove dependency info from entries.
     """
-    pylock_str = lockfile if lockfile is not None else export_pylock()
-    entries = parse_pylock(pylock_str)
-    if not entries:
-        raise SystemExit("No resolved packages found.")
+    # Determine ecosystem
+    if ecosystem is None and lockfile is not None:
+        ecosystem = detect_ecosystem_from_lockfile(lockfile)
+    elif ecosystem is None and dist_url:
+        ecosystem = detect_ecosystem_from_url(dist_url) or "python"
+    elif ecosystem is None:
+        ecosystem = "python"
+
+    eco_mod = get_ecosystem(ecosystem)
+
+    # Parse lockfile if available; skip if strip_deps and we have a dist artifact
+    entries = []
+    dist_info = _resolve_dist(dist_file, dist_url)
+
+    if strip_deps and dist_info and lockfile is None:
+        # No lockfile needed — just the dist artifact
+        pass
+    else:
+        lockfile_str = lockfile if lockfile is not None else eco_mod.export_lockfile()
+        entries = eco_mod.parse_lockfile(lockfile_str)
+        if not entries and not dist_info:
+            raise SystemExit("No resolved packages found.")
 
     package_name = None
-    dist_info = _resolve_dist(dist_file, dist_url)
     if dist_info:
         name, version, sha256 = dist_info
         package_name = name
-        entries.append({
-            "packageName": name,
-            "packageVersion": version,
-            "sha256": sha256,
-            "url": dist_url,
-        })
-        entries.sort(key=lambda e: e["packageName"])
+        # Only add if not already present in lockfile entries
+        existing = next((e for e in entries if e["packageName"] == name and e["packageVersion"] == version), None)
+        if existing is None:
+            entries.append({
+                "packageName": name,
+                "packageVersion": version,
+                "hash": f"sha256:{sha256}",
+                "url": dist_url,
+            })
+            entries.sort(key=lambda e: e["packageName"])
+
+    if strip_deps:
+        entries = [{k: v for k, v in e.items() if k != "dependencies"} for e in entries]
+
+    # Extract metadata from the dist artifact (prefer local file)
+    dist_meta: dict[str, str] = {}
+    if dist_info:
+        try:
+            if dist_file and hasattr(eco_mod, "extract_local_dist_metadata"):
+                dist_meta = eco_mod.extract_local_dist_metadata(dist_file)
+            elif dist_url:
+                dist_meta = eco_mod.extract_dist_metadata(dist_url)
+        except Exception:
+            pass  # metadata extraction is best-effort
 
     record: dict = {
         "$type": COLLECTION,
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "ecosystem": {
-            "$type": "dev.atrun.module#pythonEcosystem",
-        },
+        "ecosystem": eco_mod.build_ecosystem_value(permissions=permissions) if ecosystem == "deno" else eco_mod.build_ecosystem_value(),
         "resolved": entries,
     }
     if package_name:
         record["package"] = package_name
+        # Add version from the resolved entry
+        pkg_entry = next((e for e in entries if e["packageName"] == package_name), None)
+        if pkg_entry:
+            record["version"] = pkg_entry["packageVersion"]
+    for field in ("description", "license", "url"):
+        if field in dist_meta:
+            record[field] = dist_meta[field]
     return record
 
 
@@ -105,29 +150,31 @@ def publish(
     lockfile: str | None = None,
     dist_file: Path | None = None,
     dist_url: str | None = None,
+    ecosystem: str | None = None,
+    permissions: list[str] | None = None,
+    strip_deps: bool = False,
 ) -> str:
     """Publish the lockfile as an AT Protocol record.
 
     Returns the AT URI of the created record.
     """
-    record = build_record(lockfile, dist_file, dist_url)
+    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, permissions=permissions, strip_deps=strip_deps)
 
     session = load_session()
     did = session["did"]
 
-    try:
-        at_uri = _create_record(session, did, record)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            session = refresh_session(session)
-            at_uri = _create_record(session, did, record)
-        else:
-            raise
+    resp = _create_record(session, did, record)
+    if resp.get("error") in ("ExpiredToken", "InvalidToken"):
+        session = refresh_session(session)
+        resp = _create_record(session, did, record)
 
-    return at_uri
+    if "uri" not in resp:
+        raise SystemExit(f"Failed to create record: {resp}")
+
+    return resp["uri"]
 
 
-def _create_record(session: dict, did: str, record: dict) -> str:
+def _create_record(session: dict, did: str, record: dict) -> dict:
     resp = httpx.post(
         "https://bsky.social/xrpc/com.atproto.repo.createRecord",
         headers={"Authorization": f"Bearer {session['accessJwt']}"},
@@ -137,6 +184,4 @@ def _create_record(session: dict, did: str, record: dict) -> str:
             "record": record,
         },
     )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["uri"]
+    return resp.json()

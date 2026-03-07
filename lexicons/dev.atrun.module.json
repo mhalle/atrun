@@ -21,6 +21,22 @@
             "type": "string",
             "maxLength": 256
           },
+          "version": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "license": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
           "resolved": {
             "type": "array",
             "items": { "type": "ref", "ref": "#depEntry" },
@@ -35,7 +51,7 @@
     },
     "ecosystem": {
       "type": "union",
-      "refs": ["#pythonEcosystem", "#nodeEcosystem"]
+      "refs": ["#pythonEcosystem", "#nodeEcosystem", "#denoEcosystem"]
     },
     "pythonEcosystem": {
       "type": "object",
@@ -52,13 +68,30 @@
       "properties": {
         "engine": {
           "type": "string",
+          "description": "Runtime engine, e.g. 'node' or 'bun'",
+          "maxLength": 32
+        }
+      }
+    },
+    "denoEcosystem": {
+      "type": "object",
+      "properties": {
+        "runtime": {
+          "type": "string",
+          "description": "Runtime identifier, e.g. 'deno'",
+          "maxLength": 32
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Deno permissions, e.g. 'read', 'env', 'net=example.com'",
+          "items": { "type": "string", "maxLength": 256 },
           "maxLength": 32
         }
       }
     },
     "depEntry": {
       "type": "object",
-      "required": ["packageName", "packageVersion", "sha256", "url"],
+      "required": ["packageName", "packageVersion", "hash", "url"],
       "properties": {
         "packageName": {
           "type": "string",
@@ -68,13 +101,19 @@
           "type": "string",
           "maxLength": 64
         },
-        "sha256": {
+        "hash": {
           "type": "string",
-          "maxLength": 64
+          "maxLength": 256
         },
         "url": {
           "type": "string",
           "format": "uri"
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "Direct dependencies as name@version strings",
+          "items": { "type": "string", "maxLength": 320 },
+          "maxLength": 256
         },
         "source": {
           "type": "ref",

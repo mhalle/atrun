@@ -46,60 +46,80 @@ def fetch_record(at_uri: str) -> dict:
     return resp.json()["value"]
 
 
-def generate_requirements(resolved: list[dict]) -> str:
-    """Generate a requirements.txt with --hash pins from resolved entries."""
+def generate_requirements(resolved: list[dict], record: dict | None = None) -> str:
+    """Generate resolved output appropriate to the record's ecosystem.
+
+    Falls back to Python requirements.txt format if no record is provided.
+    """
+    if record is not None:
+        from .ecosystems import detect_ecosystem_from_record, get_ecosystem
+        eco_name = detect_ecosystem_from_record(record)
+        eco_mod = get_ecosystem(eco_name)
+        return eco_mod.format_resolve_output(resolved)
+
+    # Legacy fallback: Python requirements.txt format
     lines = []
     for entry in resolved:
         name = entry["packageName"]
-        version = entry["packageVersion"]
-        sha256 = entry["sha256"]
         url = entry["url"]
-        lines.append(f"{name} @ {url} --hash=sha256:{sha256}")
+        hash_str = entry.get("hash", entry.get("sha256", ""))
+        if ":" not in hash_str:
+            hash_str = f"sha256:{hash_str}"
+        lines.append(f"{name} @ {url} --hash={hash_str}")
     return "\n".join(lines)
 
 
 def run_module(at_uri: str) -> None:
     """Fetch an atrun record and run it in a temporary environment."""
+    from .ecosystems import detect_ecosystem_from_record, get_ecosystem
+
     record = fetch_record(at_uri)
     resolved = record.get("resolved", [])
     if not resolved:
         raise SystemExit("Record has no resolved packages.")
 
-    requirements = generate_requirements(resolved)
+    package = record.get("package")
+    if not package:
+        raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
-    with tempfile.TemporaryDirectory(prefix="atrun-") as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        req_file = tmpdir_path / "requirements.txt"
-        req_file.write_text(requirements)
+    eco_name = detect_ecosystem_from_record(record)
+    eco_mod = get_ecosystem(eco_name)
 
-        venv_path = tmpdir_path / ".venv"
+    if eco_name == "python":
+        # Python: use venv + uv pip install
+        requirements = eco_mod.generate_requirements(resolved)
 
-        # Create venv
-        subprocess.run(
-            ["uv", "venv", str(venv_path)],
-            check=True,
-        )
+        with tempfile.TemporaryDirectory(prefix="atrun-") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            req_file = tmpdir_path / "requirements.txt"
+            req_file.write_text(requirements)
 
-        # Install with hash verification
-        subprocess.run(
-            [
-                "uv", "pip", "install",
-                "--require-hashes",
-                "--python", str(venv_path / "bin" / "python"),
-                "-r", str(req_file),
-            ],
-            check=True,
-        )
+            venv_path = tmpdir_path / ".venv"
 
-        package = record.get("package")
-        if not package:
-            raise SystemExit("Record has no 'package' field — cannot determine what to run.")
+            subprocess.run(
+                ["uv", "venv", str(venv_path)],
+                check=True,
+            )
 
-        subprocess.run(
-            [
-                "uv", "run",
-                "--python", str(venv_path / "bin" / "python"),
-                package,
-            ],
-            check=True,
-        )
+            subprocess.run(
+                [
+                    "uv", "pip", "install",
+                    "--require-hashes",
+                    "--python", str(venv_path / "bin" / "python"),
+                    "-r", str(req_file),
+                ],
+                check=True,
+            )
+
+            subprocess.run(
+                [
+                    "uv", "run",
+                    "--python", str(venv_path / "bin" / "python"),
+                    package,
+                ],
+                check=True,
+            )
+    else:
+        # Node/Deno: run directly
+        cmd = eco_mod.generate_run_args(record)
+        subprocess.run(cmd, check=True)

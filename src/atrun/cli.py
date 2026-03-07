@@ -15,6 +15,7 @@ import httpx
 
 
 @click.group()
+@click.version_option(package_name="atrun")
 def cli():
     """Social package distribution on AT Protocol.
 

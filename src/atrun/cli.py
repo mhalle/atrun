@@ -52,7 +52,8 @@ def login(handle: str):
 @click.option("--no-derived-from", is_flag=True, help="Suppress automatic derivedFrom linking to previous versions.")
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool):
+@click.option("--handle", "pub_handle", default=None, help="Bluesky handle to publish as. Overrides project config discovery.")
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool, pub_handle: str | None):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
@@ -82,7 +83,7 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         click.echo(json.dumps(record, indent=2))
         return
 
-    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post, handle=pub_handle)
     click.echo(record_uri)
     if post_uri:
         # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL
@@ -181,7 +182,8 @@ def list_cmd(target: str, as_json: bool):
 @cli.command()
 @click.argument("target")
 @click.option("--reason", default="", help="Reason for yanking this version.")
-def yank(target: str, reason: str):
+@click.option("--handle", "yank_handle", default=None, help="Bluesky handle to use. Overrides project config discovery.")
+def yank(target: str, reason: str, yank_handle: str | None):
     """Yank a published package version.
 
     Marks a version as withdrawn by creating a dev.atpub.yank record
@@ -208,7 +210,7 @@ def yank(target: str, reason: str):
     if not at_info or "uri" not in at_info or "cid" not in at_info:
         raise click.ClickException("Cannot yank: record has no AT Protocol envelope.")
 
-    session = load_session()
+    session = load_session(handle=yank_handle)
     did = session["did"]
 
     # Verify the record belongs to this user
@@ -235,7 +237,7 @@ def yank(target: str, reason: str):
     )
     data = resp.json()
     if data.get("error") in ("ExpiredToken", "InvalidToken"):
-        session = refresh_session(session)
+        session = refresh_session(session, handle=yank_handle)
         resp = httpx.post(
             "https://bsky.social/xrpc/com.atproto.repo.createRecord",
             headers={"Authorization": f"Bearer {session['accessJwt']}"},
@@ -258,7 +260,8 @@ def yank(target: str, reason: str):
 
 @cli.command()
 @click.argument("target")
-def unyank(target: str):
+@click.option("--handle", "unyank_handle", default=None, help="Bluesky handle to use. Overrides project config discovery.")
+def unyank(target: str, unyank_handle: str | None):
     """Remove a yank from a published package version.
 
     Deletes the dev.atpub.yank record, restoring the version to
@@ -278,7 +281,7 @@ def unyank(target: str):
     if not at_info or "uri" not in at_info:
         raise click.ClickException("Cannot unyank: record has no AT Protocol envelope.")
 
-    session = load_session()
+    session = load_session(handle=unyank_handle)
     did = session["did"]
 
     target_uri = at_info["uri"]
@@ -320,7 +323,7 @@ def unyank(target: str):
     )
     data = resp.json() if resp.content else {}
     if data.get("error") in ("ExpiredToken", "InvalidToken"):
-        session = refresh_session(session)
+        session = refresh_session(session, handle=unyank_handle)
         resp = httpx.post(
             "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
             headers={"Authorization": f"Bearer {session['accessJwt']}"},

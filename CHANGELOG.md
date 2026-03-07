@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0
+
+- Per-project credential sessions: store one session file per handle under `~/.config/atrun/sessions/`
+- Project config discovery: auto-detect handle from `[tool.atpub].handle` in pyproject.toml, `"atpub"` in package.json, or `[package.metadata.atpub]` in Cargo.toml
+- Session resolution chain: `ATRUN_SESSION` env → `ATRUN_HANDLE`+`ATRUN_APP_PASSWORD` env → `--handle` flag → project config → legacy session file
+- Add `--handle` option to `publish`, `yank`, and `unyank` commands
+- CI/CD support: set `ATRUN_HANDLE` and `ATRUN_APP_PASSWORD` env vars for automatic fresh login in GitHub Actions
+- Login saves to both per-handle file and legacy default file (last login = default)
+
 ## 0.14.4
 
 - Fix crash in `info` command: `content['hash']` → `content['digest']` (KeyError on any record with a digest)

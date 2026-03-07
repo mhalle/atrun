@@ -413,6 +413,7 @@ def publish(
     derived_from: tuple[str, ...] | None = None,
     no_derived_from: bool = False,
     post: bool = False,
+    handle: str | None = None,
 ) -> str:
     """Build and publish a record to AT Protocol.
 
@@ -428,7 +429,7 @@ def publish(
     """
     record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps, derived_from=derived_from)
 
-    session = load_session()
+    session = load_session(handle=handle)
     did = session["did"]
 
     # Auto-link to previous version if not explicitly provided or suppressed
@@ -440,7 +441,7 @@ def publish(
 
     resp = _create_record(session, did, record)
     if resp.get("error") in ("ExpiredToken", "InvalidToken"):
-        session = refresh_session(session)
+        session = refresh_session(session, handle=handle)
         resp = _create_record(session, did, record)
 
     if "uri" not in resp:
@@ -452,7 +453,7 @@ def publish(
     if post:
         post_resp = _create_post(session, did, record_uri, record)
         if post_resp.get("error") in ("ExpiredToken", "InvalidToken"):
-            session = refresh_session(session)
+            session = refresh_session(session, handle=handle)
             post_resp = _create_post(session, did, record_uri, record)
         post_uri = post_resp.get("uri")
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+
+- Add `--derived-from` flag to publish: explicitly link to any record (AT URI, XRPC URL, or bsky.app URL)
+- Add `--no-derived-from` flag to suppress automatic version chain linking
+- Include project URL in Bluesky post link card description
+
 ## 0.10.0
 
 - Add Rust (Cargo) ecosystem support: parse Cargo.lock, install via `cargo install`, metadata from crates.io API

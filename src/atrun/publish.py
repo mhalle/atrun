@@ -200,6 +200,7 @@ def build_record(
     dist_url: str | None = None,
     ecosystem: str | None = None,
     strip_deps: bool = False,
+    derived_from: str | None = None,
 ) -> dict:
     """Build a dev.atrun.module record without publishing it.
 
@@ -211,10 +212,12 @@ def build_record(
         dist_file: Path to a local distribution file to hash and include.
         dist_url: Public URL for the distribution. Becomes the download
             URL in the record.
-        ecosystem: Target ecosystem ('python', 'node'). Auto-detected
+        ecosystem: Target ecosystem ('python', 'node', 'rust'). Auto-detected
             from lockfile content or dist URL if None.
         strip_deps: If True, remove dependency arrays from resolved entries
             and skip lockfile parsing when a dist artifact is provided.
+        derived_from: URI of the record this derives from. Accepts AT URIs,
+            XRPC HTTPS URLs, or bsky.app post URLs. Resolved to a strongRef.
 
     Returns:
         A dict representing the complete AT Protocol record, ready for
@@ -293,6 +296,16 @@ def build_record(
     for field in ("description", "license", "url"):
         if field in dist_meta:
             record[field] = dist_meta[field]
+
+    if derived_from:
+        from .run import fetch_record
+        result = fetch_record(derived_from)
+        at_info = result.get("at")
+        if at_info and "uri" in at_info and "cid" in at_info:
+            record["derivedFrom"] = {"uri": at_info["uri"], "cid": at_info["cid"]}
+        else:
+            raise SystemExit(f"Cannot resolve derivedFrom: {derived_from} (no AT envelope)")
+
     return record
 
 
@@ -302,6 +315,8 @@ def publish(
     dist_url: str | None = None,
     ecosystem: str | None = None,
     strip_deps: bool = False,
+    derived_from: str | None = None,
+    no_derived_from: bool = False,
     post: bool = False,
 ) -> str:
     """Build and publish a record to AT Protocol.
@@ -316,14 +331,14 @@ def publish(
     Returns the AT URI of the created record
     (e.g. at://did:plc:abc123/dev.atrun.module/3mgxyz).
     """
-    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps)
+    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps, derived_from=derived_from)
 
     session = load_session()
     did = session["did"]
 
-    # Link to previous version of the same package
+    # Auto-link to previous version if not explicitly provided or suppressed
     package = record.get("package")
-    if package:
+    if package and "derivedFrom" not in record and not no_derived_from:
         prev = _find_previous_record(session, did, package)
         if prev:
             record["derivedFrom"] = prev

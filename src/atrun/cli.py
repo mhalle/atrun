@@ -45,9 +45,11 @@ def login(handle: str):
 @click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
 @click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
+@click.option("--derived-from", "derived_from", help="AT URI, XRPC URL, or bsky.app URL of the record this derives from. Auto-detected from previous versions if omitted.")
+@click.option("--no-derived-from", is_flag=True, help="Suppress automatic derivedFrom linking to previous versions.")
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, post: bool, dry_run: bool):
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: str | None, no_derived_from: bool, post: bool, dry_run: bool):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
@@ -73,11 +75,11 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         lockfile_str = Path(lockfile).read_text()
 
     if dry_run:
-        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps)
+        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from)
         click.echo(json.dumps(record, indent=2))
         return
 
-    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, post=post)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from, no_derived_from=no_derived_from, post=post)
     click.echo(record_uri)
     if post_uri:
         # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL

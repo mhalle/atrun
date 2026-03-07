@@ -2,7 +2,7 @@
 
 Social package distribution on AT Protocol.
 
-> **Alpha experiment.** This project explores decentralized package distribution on AT Protocol. The ideas are sound but the implementation is very early — the schema, CLI, and record format will change without notice. Do not use this for production systems or anything you intend to maintain long-term. If you're interested in the direction, follow along, but don't build on it yet.
+> **Alpha experiment.** This project explores decentralized package distribution on AT Protocol. The ideas are sound but the implementation is very early — the schema, CLI, and record format will change without notice. Do not use this for production systems or anything you intend to maintain long-term. atrun has been tested most fully with the Python ecosystem; other ecosystems work but have seen less use. If you're interested in the direction, follow along, but don't build on it yet.
 
 ## Why
 
@@ -30,11 +30,20 @@ AT Protocol has a layered architecture that maps naturally to package distributi
 - **PDS** (Personal Data Server) — stores your records. This is where atrun publishes today.
 - **AppView** — aggregates and indexes records across all users. No AppView exists yet for `dev.atpub.manifest`. When one is built, it could provide search, discovery, dependency graphs, trust analysis, and supply chain monitoring across the entire network.
 
-Today, atrun reads and writes directly to PDS instances. Anyone can publish. When AppViews exist, they will decide how to present and index records. Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance.
+Today, atrun reads and writes directly to PDS instances. Anyone can publish. No AppView exists yet, but because all `dev.atpub.manifest` records are public and follow a common schema, AppViews could be built to:
+
+- **Monitor software releases** across the entire network in real time
+- **Analyze packages for security vulnerabilities** and flag suspicious changes
+- **Track usage and adoption** across publishers and ecosystems
+- **Verify interoperability** between packages and their declared dependencies
+- **Provide search and discovery** — find packages by name, ecosystem, publisher, or social signals
+- **Audit supply chains** — trace dependency graphs, detect version conflicts, identify unmaintained packages
+
+Multiple competing AppViews could coexist — one focused on security auditing, another on discovery, another on enterprise compliance — each with its own policies and presentation, all reading the same underlying data.
 
 ## Install
 
-atrun requires [uv](https://docs.astral.sh/uv/) and Python 3.12+. Install uv first if you don't have it:
+atrun is a Python package that requires Python 3.12+. The easiest way to install it is with [uv](https://docs.astral.sh/uv/):
 
 ```
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -365,6 +374,27 @@ Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json)
 | `derivedFrom` | StrongRef(s) to records this derives from (uri + CID) |
 
 Each artifact entry has optional fields: `id`, `name`, `version`, `digest`, `url`, `artifactType`, `dependencies`, `metadata`, and `ref` (a strongRef to the artifact's own manifest record). While all fields are optional in the schema, artifacts are expected to provide a unique, dereferenceable, and verifiable descriptor of their resource. What that means depends on the application — Python and npm lockfiles use a combination of `name`, `url`, and `digest`; other applications may use a unique `id` and conventions for accessing the resource through it. Applications are responsible for enforcing these constraints for security and correctness.
+
+## How atrun compares
+
+atrun/atpub occupies a different point in the design space than existing package distribution systems.
+
+**Traditional registries** (PyPI, npm, crates.io) are centralized services that store both metadata and artifacts. They handle identity (account systems), discovery (search), and distribution (hosting). They work well — but they're single points of control, and each one is ecosystem-specific. A Python developer and a Rust developer use completely different systems with different identities and different trust models.
+
+**Sigstore / in-toto / SLSA** focus on supply chain attestation — proving *how* an artifact was built (build provenance, transparency logs, signing). These are complementary to atrun. atpub manifests could reference Sigstore signatures or SLSA provenance records in artifact metadata. atrun solves a different problem: *who* published something and *what* they published, with a decentralized identity layer.
+
+**OCI / ORAS** generalized container registries to store any artifact type. Like atpub, they're ecosystem-agnostic. But OCI registries are still centralized infrastructure — you need to run or rent a registry. atpub records live in AT Protocol personal data repositories, with no dedicated infrastructure required beyond what already exists for Bluesky.
+
+**IPFS / content-addressed systems** share atpub's emphasis on integrity (CIDs, content hashes). But IPFS focuses on content storage and retrieval. atpub doesn't store content at all — it stores signed metadata that *points to* content hosted elsewhere. The artifacts themselves stay on GitHub Releases, PyPI, npm, Docker Hub, wherever they already are.
+
+**GitHub Releases / artifact hosting** provide download URLs but no structured metadata, no identity beyond the GitHub account, no dependency information, and no cross-ecosystem format. atpub adds a structured metadata layer on top of these existing hosting services.
+
+What's different about atpub:
+- **Cross-ecosystem** — one record format for Python, Node, Rust, Go, containers, datasets, anything
+- **Decentralized identity** — publisher identity is a DID, not an account on a specific service
+- **No artifact hosting** — manifests point to artifacts wherever they already live
+- **Social distribution** — publication, description, announcement, and distribution through a large-scale, robust social media network. Package releases become native social objects that can be discussed, shared, and discovered alongside regular posts.
+- **Portable** — records move with the user across PDS instances; no lock-in to a specific server
 
 ## License
 

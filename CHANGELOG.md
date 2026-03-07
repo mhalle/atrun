@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Automatic `derivedFrom` linking: new records point back to the previous version of the same package with a cryptographically verified strongRef (uri + CID)
+- Show `derivedFrom` in `info` output
+- Include project URL in Bluesky post link card description
+
 ## 0.7.1
 
 - Include description and URL in Bluesky post text (clipped to 300 graphemes)

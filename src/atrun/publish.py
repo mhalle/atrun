@@ -279,6 +279,13 @@ def publish(
     session = load_session()
     did = session["did"]
 
+    # Link to previous version of the same package
+    package = record.get("package")
+    if package:
+        prev = _find_previous_record(session, did, package)
+        if prev:
+            record["derivedFrom"] = prev
+
     resp = _create_record(session, did, record)
     if resp.get("error") in ("ExpiredToken", "InvalidToken"):
         session = refresh_session(session)
@@ -298,6 +305,26 @@ def publish(
         post_uri = post_resp.get("uri")
 
     return record_uri, post_uri
+
+
+def _find_previous_record(session: dict, did: str, package: str) -> dict | None:
+    """Find the most recent existing record for the same package.
+
+    Lists records in reverse chronological order (newest TID first) and
+    returns the first one matching the package name as a strongRef
+    {uri, cid}, or None if no previous record exists.
+    """
+    resp = httpx.get(
+        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        params={"repo": did, "collection": COLLECTION, "limit": 100, "reverse": False},
+    )
+    if resp.status_code != 200:
+        return None
+    for rec in resp.json().get("records", []):
+        if rec.get("value", {}).get("package") == package:
+            return {"uri": rec["uri"], "cid": rec["cid"]}
+    return None
 
 
 def _create_record(session: dict, did: str, record: dict) -> dict:
@@ -363,7 +390,7 @@ def _create_post(session: dict, did: str, record_uri: str, record: dict) -> dict
             "external": {
                 "uri": xrpc_url,
                 "title": f"{package} {version}",
-                "description": description,
+                "description": f"{description}\n{url}" if url else description,
             },
         },
     }

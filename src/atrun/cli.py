@@ -209,6 +209,10 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, unsigned: boo
     elif "node" in eco_type:
         content["ecosystem"] = "node"
 
+    derived = record.get("derivedFrom")
+    if derived:
+        content["derivedFrom"] = derived.get("uri", "")
+
     resolved = record.get("resolved", [])
     content["dependencies"] = len(resolved)
     output["content"] = content

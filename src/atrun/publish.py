@@ -48,6 +48,31 @@ def _resolve_npm_shorthand(spec: str) -> str:
     return tarball
 
 
+def _resolve_crate_shorthand(spec: str) -> str:
+    """Resolve crate:name or crate:name@version to a crates.io download URL.
+
+    Without @version, fetches the latest version from crates.io.
+    """
+    name = spec.removeprefix("crate:")
+    if "@" in name:
+        name, version = name.rsplit("@", 1)
+    else:
+        version = None
+
+    resp = httpx.get(
+        f"https://crates.io/api/v1/crates/{name}",
+        headers={"User-Agent": "atrun"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if version is None:
+        version = data.get("crate", {}).get("max_version")
+        if not version:
+            raise SystemExit(f"Cannot determine latest version of crate {name}")
+
+    return f"https://crates.io/api/v1/crates/{name}/{version}/download"
+
 
 
 def _resolve_github_shorthand(spec: str) -> str:
@@ -117,6 +142,22 @@ def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def _name_version_from_dist_url(url: str) -> tuple[str, str]:
+    """Extract (name, version) from a distribution URL.
+
+    Handles crates.io URLs (/.../crates/{name}/{version}/download)
+    and falls back to filename-based parsing.
+    """
+    # crates.io: /api/v1/crates/{name}/{version}/download
+    if "crates.io" in url and "/download" in url:
+        import re
+        m = re.search(r"/crates/([^/]+)/([^/]+)/download", url)
+        if m:
+            return m.group(1), m.group(2)
+    filename = url.rsplit("/", 1)[-1]
+    return _name_version_from_dist_filename(filename)
+
+
 def _resolve_dist(dist_file: Path | None, dist_url: str | None) -> tuple[str, str, str] | None:
     """Resolve a distribution artifact to (name, version, sha256_hex).
 
@@ -145,8 +186,7 @@ def _resolve_dist(dist_file: Path | None, dist_url: str | None) -> tuple[str, st
             pass  # Remote not available yet — use local hash
         return name, version, local_sha256
     if dist_url and not dist_file:
-        filename = dist_url.rsplit("/", 1)[-1]
-        name, version = _name_version_from_dist_filename(filename)
+        name, version = _name_version_from_dist_url(dist_url)
         resp = httpx.get(dist_url, follow_redirects=True)
         resp.raise_for_status()
         sha256 = _hash_bytes(resp.content)
@@ -185,6 +225,8 @@ def build_record(
         dist_url = _resolve_github_shorthand(dist_url)
     elif dist_url and dist_url.startswith("npm:"):
         dist_url = _resolve_npm_shorthand(dist_url)
+    elif dist_url and dist_url.startswith("crate:"):
+        dist_url = _resolve_crate_shorthand(dist_url)
 
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:

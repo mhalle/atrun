@@ -17,7 +17,7 @@ def cli():
     """Social package distribution on AT Protocol.
 
     Publish, inspect, install, and run packages from AT Protocol records.
-    Supports Python (pip/uv) and Node.js (npm/pnpm/bun) ecosystems.
+    Supports Python (pip/uv), Node.js (npm/pnpm/bun), and Rust (cargo) ecosystems.
 
     Records can be referenced by AT URI (at://did/collection/rkey) or by
     HTTPS URL (XRPC getRecord endpoint or plain JSON with --unsigned).
@@ -43,7 +43,7 @@ def login(handle: str):
 @click.option("--lockfile", type=click.Path(), help="Path to lockfile, or '-' for stdin. Omit to auto-export via the ecosystem's default tool.")
 @click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file (wheel, tarball) to hash and include.")
 @click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
-@click.option("--ecosystem", "eco", type=click.Choice(["python", "node"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
+@click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
@@ -117,11 +117,12 @@ def resolve(uri: str, unsigned: bool):
 @cli.command()
 @click.argument("uri")
 @click.option("--json", "as_json", is_flag=True, help="Output as structured JSON with 'at' (envelope) and 'content' sections.")
+@click.option("--raw", is_flag=True, help="Print the full raw AT Protocol record as returned by the PDS.")
 @click.option("--dist", "show_dist", is_flag=True, help="Print only the distribution artifact URL.")
 @click.option("--registry", is_flag=True, help="Fetch full metadata from the ecosystem's package registry (PyPI, npm, JSR) instead of showing record metadata.")
 @click.option("--social", is_flag=True, help="Show social context: publisher profile and post engagement (likes, reposts, replies).")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
-def info(uri: str, as_json: bool, show_dist: bool, registry: bool, social: bool, unsigned: bool):
+def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, social: bool, unsigned: bool):
     """Show metadata for a published package record.
 
     By default, displays metadata stored in the record itself: package name,
@@ -155,6 +156,14 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, social: bool,
     package = record.get("package")
     if not package:
         raise click.ClickException("Record has no 'package' field.")
+
+    if raw:
+        raw_output = {}
+        if at_info:
+            raw_output.update(at_info)
+        raw_output["value"] = record
+        click.echo(json.dumps(raw_output, indent=2))
+        return
 
     if show_dist:
         resolved = record.get("resolved", [])
@@ -213,12 +222,19 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, social: bool,
         content["ecosystem"] = "python"
     elif "node" in eco_type:
         content["ecosystem"] = "node"
+    elif "rust" in eco_type:
+        content["ecosystem"] = "rust"
+
+    # Include hash of the main package
+    resolved = record.get("resolved", [])
+    pkg_entry = next((e for e in resolved if e["packageName"] == package), None)
+    if pkg_entry and "hash" in pkg_entry:
+        content["hash"] = pkg_entry["hash"]
 
     derived = record.get("derivedFrom")
     if derived:
         content["derivedFrom"] = derived.get("uri", "")
 
-    resolved = record.get("resolved", [])
     content["dependencies"] = len(resolved)
     output["content"] = content
 
@@ -234,21 +250,49 @@ def info(uri: str, as_json: bool, show_dist: bool, registry: bool, social: bool,
         click.echo(json.dumps(output, indent=2))
         return
 
-    # Human-readable output
+    # Human-readable output — grouped logically
+    # Package identity
+    click.echo(f"package: {content['package']}")
+    if "version" in content:
+        click.echo(f"version: {content['version']}")
+    if "ecosystem" in content:
+        click.echo(f"ecosystem: {content['ecosystem']}")
+
+    # Description and metadata
+    if "description" in content:
+        click.echo(f"description: {content['description']}")
+    if "license" in content:
+        click.echo(f"license: {content['license']}")
+    if "url" in content:
+        click.echo(f"url: {content['url']}")
+
+    # Integrity
+    if "hash" in content:
+        click.echo(f"hash: {content['hash']}")
+    click.echo(f"dependencies: {content['dependencies']}")
+
+    # Any remaining content fields not yet printed
+    shown = {"package", "version", "ecosystem", "description", "license", "url", "hash", "dependencies", "derivedFrom"}
+    for key, value in content.items():
+        if key not in shown:
+            click.echo(f"{key}: {value}")
+
+    # AT Protocol provenance
     if at_info:
+        click.echo("")
         if "handle" in at_info:
             click.echo(f"publisher: {at_info['handle']} ({at_info['did']})")
         elif "did" in at_info:
             click.echo(f"publisher: {at_info['did']}")
-        if "cid" in at_info:
-            click.echo(f"cid: {at_info['cid']}")
         if "timestamp" in at_info:
             click.echo(f"timestamp: {at_info['timestamp']}")
+        if "cid" in at_info:
+            click.echo(f"cid: {at_info['cid']}")
+        if "derivedFrom" in content:
+            click.echo(f"derivedFrom: {content['derivedFrom']}")
     elif unsigned:
+        click.echo("")
         click.echo("publisher: unsigned (no AT Protocol verification)")
-
-    for key, value in content.items():
-        click.echo(f"{key}: {value}")
 
     if social_info:
         pub = social_info.get("publisher")
@@ -290,7 +334,8 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
     """Install a package from an AT Protocol record.
 
     Fetches the record, detects the ecosystem, and installs the package
-    using the appropriate tool (uv for Python, pnpm/bun/npm for Node).
+    using the appropriate tool (uv for Python, pnpm/bun/npm for Node,
+    cargo for Rust).
 
     By default, uses frozen lockfile verification if the record contains a
     dependency graph (published with --deps), and falls back to direct
@@ -354,6 +399,13 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, en
             click.echo(shlex.join(cmd))
             return
 
+        subprocess.run(cmd, check=True)
+    elif eco_name == "rust":
+        # Rust: cargo install
+        cmd = eco_mod.generate_install_args(record) + list(extra_args)
+        if install_dry_run:
+            click.echo(shlex.join(cmd))
+            return
         subprocess.run(cmd, check=True)
     else:
         # Node: determine whether to use verified install

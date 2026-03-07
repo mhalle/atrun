@@ -16,6 +16,7 @@ from types import ModuleType
 _ECOSYSTEM_MODULES = {
     "python": ".python",
     "node": ".node",
+    "rust": ".rust",
 }
 
 
@@ -59,6 +60,8 @@ def detect_ecosystem_from_url(url: str) -> str | None:
         return "node"
     if "files.pythonhosted.org" in url or url.endswith(".whl"):
         return "python"
+    if "crates.io" in url:
+        return "rust"
     return None
 
 
@@ -66,14 +69,20 @@ def detect_ecosystem_from_lockfile(content: str) -> str:
     """Auto-detect ecosystem by inspecting lockfile content.
 
     Detection rules:
-      - Valid TOML -> 'python' (pylock.toml)
+      - TOML with [[package]] and checksum fields -> 'rust' (Cargo.lock)
+      - TOML with [[packages]] or lock-version -> 'python' (pylock.toml)
       - JSON with 'lockfileVersion' -> 'node' (package-lock.json)
 
     Raises SystemExit if the content cannot be identified.
     """
-    # Try TOML first (Python pylock.toml)
+    # Try TOML first
     try:
-        tomllib.loads(content)
+        data = tomllib.loads(content)
+        # Cargo.lock has [[package]] with checksum fields
+        if "package" in data and isinstance(data["package"], list):
+            if any(p.get("checksum") for p in data["package"]):
+                return "rust"
+        # pylock.toml has [[packages]] (plural) or lock-version
         return "python"
     except Exception:
         pass
@@ -88,3 +97,16 @@ def detect_ecosystem_from_lockfile(content: str) -> str:
         return "node"
 
     raise SystemExit("Cannot detect ecosystem from lockfile content.")
+
+
+def detect_ecosystem_from_lockfile_path(path: str) -> str | None:
+    """Auto-detect ecosystem from lockfile filename.
+
+    Recognizes:
+      - Cargo.lock -> 'rust'
+
+    Returns None if not recognized (falls through to content detection).
+    """
+    if path.endswith("Cargo.lock"):
+        return "rust"
+    return None

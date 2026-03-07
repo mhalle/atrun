@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+- Add Rust (Cargo) ecosystem support: parse Cargo.lock, install via `cargo install`, metadata from crates.io API
+- Add `rustEcosystem` to lexicon
+- Add `crate:` dist URL shorthand (e.g. `crate:ripgrep`, `crate:ripgrep@14.1.1`)
+- Auto-detect Rust from Cargo.lock content or crates.io URLs
+- Dependency graph support for Cargo.lock with `--deps`
+- Add `info --raw` flag to dump the full AT Protocol record as-is
+- Show package hash in `info` output
+- Reorganize `info` display: package identity, metadata, then AT provenance
+- Future-proof `info` output: unknown fields are displayed automatically
+
 ## 0.9.0
 
 - Add `info --social` flag: shows publisher profile (followers, bio) and Bluesky post engagement (likes, reposts, replies)

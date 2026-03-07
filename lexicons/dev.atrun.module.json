@@ -51,7 +51,7 @@
     },
     "ecosystem": {
       "type": "union",
-      "refs": ["#pythonEcosystem", "#nodeEcosystem"]
+      "refs": ["#pythonEcosystem", "#nodeEcosystem", "#rustEcosystem"]
     },
     "pythonEcosystem": {
       "type": "object",
@@ -72,6 +72,10 @@
           "maxLength": 32
         }
       }
+    },
+    "rustEcosystem": {
+      "type": "object",
+      "properties": {}
     },
     "depEntry": {
       "type": "object",

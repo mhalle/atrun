@@ -502,6 +502,56 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
         cmd = ["uvx", "--from", f"{package} @ {pkg_url}", package]
         os.execvp(cmd[0], cmd)
+    elif eco_name == "node":
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        if not pkg_entry:
+            raise SystemExit(f"Package '{package}' not found in resolved list.")
+
+        pkg_hash = pkg_entry.get("hash", "")
+        verified_path = None
+
+        if do_verify and pkg_hash:
+            from .verify import HashMismatchError, download_and_verify
+
+            print(f"Verifying {package}...", file=sys.stderr)
+            try:
+                verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+            except HashMismatchError as exc:
+                raise SystemExit(str(exc))
+            print("Hash verified.", file=sys.stderr)
+            pkg_spec = f"file://{verified_path}"
+        elif do_verify and not pkg_hash:
+            print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
+            pkg_spec = f"{package}@{pkg_entry['version']}"
+        else:
+            pkg_spec = f"{package}@{pkg_entry['version']}"
+
+        selected_engine = engine or "pnpm"
+        if selected_engine == "bun":
+            cmd = ["bunx", pkg_spec]
+        elif selected_engine == "npm":
+            cmd = ["npx", pkg_spec]
+        else:
+            cmd = ["pnpx", pkg_spec]
+        os.execvp(cmd[0], cmd)
+    elif eco_name == "rust":
+        pkg_entry = next((e for e in resolved if e["name"] == package), None)
+        if do_verify and pkg_entry:
+            pkg_hash = pkg_entry.get("hash", "")
+            if pkg_hash:
+                from .verify import HashMismatchError, verify_artifact
+
+                print(f"Verifying {package}...", file=sys.stderr)
+                try:
+                    verify_artifact(pkg_entry["url"], pkg_hash)
+                except HashMismatchError as exc:
+                    raise SystemExit(str(exc))
+                print("Hash verified.", file=sys.stderr)
+            else:
+                print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
+
+        cmd = eco_mod.generate_run_args(record)
+        os.execvp(cmd[0], cmd)
     else:
         engine_kwargs = {}
         if engine and eco_name == "node":

@@ -851,12 +851,37 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             if install_dry_run and result:
                 click.echo(shlex.join(result))
         else:
-            # Direct install — let the package manager resolve deps
-            cmd = eco_mod.generate_install_args(record, **engine_kwargs) + list(extra_args)
+            # Direct install — verify hash then use local tarball
+            pkg_entry = next((e for e in resolved if e["name"] == package), None)
+            verified_path = None
+            pkg_spec = f"{package}@{pkg_entry['version']}" if pkg_entry else package
+
+            if do_verify and pkg_entry:
+                pkg_hash = pkg_entry.get("hash", "")
+                if pkg_hash:
+                    from .verify import HashMismatchError, download_and_verify
+
+                    click.echo(f"Verifying {package}...", err=True)
+                    try:
+                        verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+                    except HashMismatchError as exc:
+                        raise click.ClickException(str(exc))
+                    pkg_spec = f"file://{verified_path}"
+                    click.echo("Hash verified.", err=True)
+                else:
+                    click.echo(f"Warning: no hash in record for {package}, skipping verification.", err=True)
+
+            selected_engine = engine or eco_mod.DEFAULT_ENGINE
+            cmd = [selected_engine, "install", "-g", pkg_spec, *extra_args]
             if install_dry_run:
                 click.echo(shlex.join(cmd))
                 return
-            subprocess.run(cmd, check=True)
+
+            try:
+                subprocess.run(cmd, check=True)
+            finally:
+                if verified_path:
+                    verified_path.unlink(missing_ok=True)
 
 
 @cli.command()

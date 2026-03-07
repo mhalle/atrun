@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0
+
+- Add `@handle:package[@version]` shorthand for all commands (info, install, run, resolve)
+- `@handle:package` resolves to the latest published version
+- `@handle:package@latest` is an explicit alias for latest
+- `@handle:package@1.0.0` resolves to an exact version
+- Add `info --raw` flag to dump the full AT Protocol record
+- Add README with motivation, usage guide, and examples
+
 ## 0.11.0
 
 - Add `--derived-from` flag to publish: explicitly link to any record (AT URI, XRPC URL, or bsky.app URL)

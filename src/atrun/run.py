@@ -15,6 +15,8 @@ import httpx
 
 AT_URI_RE = re.compile(r"^at://([^/]+)/([^/]+)/([^/]+)$")
 BSKY_POST_RE = re.compile(r"^https://bsky\.app/profile/([^/]+)/post/([^/]+)$")
+# @handle:package or @handle:package@version (version can be "latest")
+SHORTHAND_RE = re.compile(r"^@([^:]+):([^@]+)(?:@(.+))?$")
 
 
 def resolve_pds_url(handle_or_did: str) -> tuple[str, str]:
@@ -125,10 +127,41 @@ def _fetch_from_bsky_post(handle: str, rkey: str) -> dict:
     return fetch_record(record_url)
 
 
+def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
+    """Resolve @handle:package[@version] to a record.
+
+    Lists the user's dev.atrun.module records and finds the one matching
+    the package name. If version is None or 'latest', returns the most
+    recent. Otherwise matches the exact version.
+    """
+    pds_url, did = resolve_pds_url(handle)
+
+    resp = httpx.get(
+        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
+        params={"repo": did, "collection": "dev.atrun.module", "limit": 100, "reverse": False},
+    )
+    resp.raise_for_status()
+
+    for rec in resp.json().get("records", []):
+        value = rec.get("value", {})
+        if value.get("package") != package:
+            continue
+        if version and version != "latest":
+            if value.get("version") != version:
+                continue
+        # Match found — fetch via fetch_record for full envelope
+        return fetch_record(rec["uri"])
+
+    if version and version != "latest":
+        raise SystemExit(f"No record found for {package}@{version} by @{handle}")
+    raise SystemExit(f"No record found for {package} by @{handle}")
+
+
 def fetch_record(uri: str, unsigned: bool = False) -> dict:
     """Fetch a record and return a dict with 'at' and 'content' keys.
 
-    Accepts three kinds of URIs:
+    Accepts four kinds of URIs:
+      - Shorthand (@handle:package[@version]): resolved via listRecords
       - AT URI (at://did/collection/rkey): resolved via XRPC getRecord
       - XRPC HTTPS URL: fetched directly, envelope extracted from response
       - Plain HTTPS URL (requires unsigned=True): raw JSON, no AT envelope
@@ -144,6 +177,11 @@ def fetch_record(uri: str, unsigned: bool = False) -> dict:
 
     For unsigned HTTPS URLs, 'at' is None.
     """
+    # Check for @handle:package[@version] shorthand
+    shorthand_m = SHORTHAND_RE.match(uri)
+    if shorthand_m:
+        return _resolve_shorthand(shorthand_m.group(1), shorthand_m.group(2), shorthand_m.group(3))
+
     if uri.startswith("https://"):
         # Check for bsky.app post URL — extract embedded atrun record
         bsky_m = BSKY_POST_RE.match(uri)

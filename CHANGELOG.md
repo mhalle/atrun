@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Include description and URL in Bluesky post text (clipped to 300 graphemes)
+- Add link facet on URL in post text so it's clickable
+
 ## 0.7.0
 
 - Remove Deno ecosystem support (doesn't fit single-artifact distribution model)

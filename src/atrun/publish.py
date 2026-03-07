@@ -332,12 +332,32 @@ def _create_post(session: dict, did: str, record_uri: str, record: dict) -> dict
         f"?repo={parts[0]}&collection={parts[1]}&rkey={parts[2]}"
     )
 
+    url = record.get("url", "")
+
+    # Build post text: "package version\ndescription\nurl" clipped to 300 graphemes
     text = f"{package} {version}"
+    if description:
+        text += f"\n{description}"
+    if url:
+        text += f"\n{url}"
+    if len(text) > 300:
+        text = text[:299] + "…"
+
+    # Build facets for any URL in the text
+    facets = []
+    if url and url in text:
+        byte_start = text.encode("utf-8").index(url.encode("utf-8"))
+        byte_end = byte_start + len(url.encode("utf-8"))
+        facets.append({
+            "index": {"byteStart": byte_start, "byteEnd": byte_end},
+            "features": [{"$type": "app.bsky.richtext.facet#link", "uri": url}],
+        })
 
     post = {
         "$type": "app.bsky.feed.post",
         "text": text,
         "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        **({"facets": facets} if facets else {}),
         "embed": {
             "$type": "app.bsky.embed.external",
             "external": {

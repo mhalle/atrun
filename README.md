@@ -10,7 +10,9 @@ Package registries like PyPI, npm, and crates.io are centralized services that s
 
 atrun takes a different approach: it uses [AT Protocol](https://atproto.com/) (the protocol behind [Bluesky](https://bsky.app)) as a decentralized package registry. Package records live in users' personal data repositories, the same infrastructure that stores their social posts.
 
-A `dev.atpub.manifest` record is a **signed manifest** — a generic, ecosystem-agnostic artifact record. It doesn't contain code, it points to artifacts hosted elsewhere (GitHub Releases, PyPI, npm, crates.io) and adds:
+atrun is built on **atpub**, a [Lexicon](https://atproto.com/guides/lexicon) (AT Protocol's schema system) for describing software artifacts. The `dev.atpub.manifest` record type is a generic, ecosystem-agnostic manifest that can represent lockfiles (uv.lock, package-lock.json, Cargo.lock), container compositions, or any collection of artifacts. atrun is one application of the atpub lexicon — it uses `dev.atpub.manifest` records for package distribution, but other tools could use the same record format for different purposes (build provenance, supply chain auditing, dataset publishing).
+
+A `dev.atpub.manifest` record is a **signed manifest**. It doesn't contain code, it points to artifacts hosted elsewhere (GitHub Releases, PyPI, npm, crates.io) and adds:
 
 - **Identity** — every record is tied to a DID (decentralized identifier), so you know who published it
 - **Integrity** — every record has a CID (content hash) and dependency hashes for tamper detection

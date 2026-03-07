@@ -342,7 +342,7 @@ def build_record(
         result = fetch_record(derived_from)
         at_info = result.get("at")
         if at_info and "uri" in at_info and "cid" in at_info:
-            record["derivedFrom"] = {"uri": at_info["uri"], "cid": at_info["cid"]}
+            record["derivedFrom"] = [{"uri": at_info["uri"], "cid": at_info["cid"]}]
         else:
             raise SystemExit(f"Cannot resolve derivedFrom: {derived_from} (no AT envelope)")
 
@@ -381,7 +381,7 @@ def publish(
     if package and "derivedFrom" not in record and not no_derived_from:
         prev = _find_previous_record(session, did, package)
         if prev:
-            record["derivedFrom"] = prev
+            record["derivedFrom"] = [prev]
 
     resp = _create_record(session, did, record)
     if resp.get("error") in ("ExpiredToken", "InvalidToken"):

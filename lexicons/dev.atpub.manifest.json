@@ -61,8 +61,10 @@
             "maxLength": 2048
           },
           "derivedFrom": {
-            "type": "ref",
-            "ref": "com.atproto.repo.strongRef"
+            "type": "array",
+            "description": "Records this manifest derives from. Typically one entry linking to the previous version.",
+            "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+            "maxLength": 512
           }
         }
       }

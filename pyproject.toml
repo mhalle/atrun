@@ -16,6 +16,9 @@ Repository = "https://github.com/mhalle/atrun"
 [project.scripts]
 atrun = "atrun.cli:cli"
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

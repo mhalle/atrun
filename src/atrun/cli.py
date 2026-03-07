@@ -425,11 +425,17 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
                 entry["cid"] = cid
             chain.append(entry)
 
-            # Follow derivedFrom
+            # Follow derivedFrom (list of strongRefs, or legacy single dict)
             derived = current_record.get("derivedFrom")
-            if not derived or not derived.get("uri"):
+            if not derived:
                 break
-            derived_uri = derived["uri"]
+            # Normalize: accept both list and legacy single-dict format
+            if isinstance(derived, dict):
+                derived = [derived]
+            first = derived[0] if derived else None
+            if not first or not first.get("uri"):
+                break
+            derived_uri = first["uri"]
             if derived_uri in seen:
                 break  # cycle detection
             seen.add(derived_uri)
@@ -529,7 +535,10 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     derived = record.get("derivedFrom")
     if derived:
-        content["derivedFrom"] = derived.get("uri", "")
+        # Normalize: accept both list and legacy single-dict format
+        if isinstance(derived, dict):
+            derived = [derived]
+        content["derivedFrom"] = [ref.get("uri", "") for ref in derived]
 
     content["dependencies"] = len(resolved)
 
@@ -597,7 +606,8 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         if "cid" in at_info:
             click.echo(f"cid: {at_info['cid']}")
         if "derivedFrom" in content:
-            click.echo(f"derivedFrom: {content['derivedFrom']}")
+            for uri in content["derivedFrom"]:
+                click.echo(f"derivedFrom: {uri}")
     elif unsigned:
         click.echo("")
         click.echo("publisher: unsigned (no AT Protocol verification)")

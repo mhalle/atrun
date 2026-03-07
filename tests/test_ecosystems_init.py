@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from atrun.ecosystems import (
+    PACKAGE_TYPE_TO_ECOSYSTEM,
     PACKAGE_TYPES,
     detect_ecosystem_from_lockfile,
     detect_ecosystem_from_lockfile_path,
@@ -51,6 +52,27 @@ def test_detect_resolved_npm():
 
 def test_detect_resolved_empty():
     assert detect_ecosystem_from_resolved([]) == "python"
+
+
+def test_detect_resolved_with_package_type():
+    """packageType in record overrides URL-based detection."""
+    resolved = [{"url": "https://example.com/unknown.zip"}]
+    record = {"packageType": "dev.atpub.defs#npmPackage", "resolved": resolved}
+    assert detect_ecosystem_from_resolved(resolved, record=record) == "node"
+
+
+def test_detect_resolved_package_type_priority():
+    """packageType takes priority over URL pattern."""
+    resolved = [{"url": "https://files.pythonhosted.org/packages/foo-1.0.whl"}]
+    record = {"packageType": "dev.atpub.defs#npmPackage", "resolved": resolved}
+    assert detect_ecosystem_from_resolved(resolved, record=record) == "node"
+
+
+def test_detect_resolved_unknown_package_type_falls_back():
+    """Unknown packageType falls back to URL detection."""
+    resolved = [{"url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"}]
+    record = {"packageType": "dev.atpub.defs#unknownType", "resolved": resolved}
+    assert detect_ecosystem_from_resolved(resolved, record=record) == "node"
 
 
 # --- detect_ecosystem_from_lockfile ---

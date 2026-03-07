@@ -207,8 +207,7 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in resolved list.")
 
-    version = pkg_entry["version"]
-    return [engine, "install", "-g", f"{package}@{version}"]
+    return [engine, "install", "-g", pkg_entry["url"]]
 
 
 def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
@@ -317,7 +316,7 @@ def _build_pnpm_lockfile(record: dict) -> str:
     return yaml.dump(lock, default_flow_style=False, sort_keys=False)
 
 
-def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run: bool = False, engine: str = DEFAULT_ENGINE) -> list[str] | None:
+def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run: bool = False, engine: str = DEFAULT_ENGINE, do_verify: bool = True) -> list[str] | None:
     """Install with a reconstructed lockfile and frozen lockfile verification.
 
     For pnpm: reconstructs pnpm-lock.yaml, verifies with --frozen-lockfile.
@@ -339,7 +338,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
     if not has_deps:
         # Fallback: direct install without lockfile verification
-        cmd = [engine, "install", "-g", f"{package}@{version}", *extra_args]
+        cmd = [engine, "install", "-g", pkg_entry["url"], *extra_args]
         if dry_run:
             return cmd
         _check_engine(engine)
@@ -348,7 +347,13 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         return None
 
     if dry_run:
-        return [engine, "install", "--frozen-lockfile", f"{package}@{version}", *extra_args]
+        import shlex
+        pkg_hash = pkg_entry.get("hash", "")
+        click.echo(shlex.join(["pnpm", "install", "--frozen-lockfile"]))
+        if do_verify and pkg_hash:
+            click.echo(f"# download and verify hash: {pkg_hash}")
+        click.echo(shlex.join([engine, "install", "-g", pkg_entry["url"], *extra_args]))
+        return None
 
     # Verified install currently requires pnpm (reconstructs pnpm-lock.yaml)
     if engine != "pnpm":
@@ -378,12 +383,35 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         )
         click.echo(f"Verified and installed {len(resolved)} packages")
 
-        # Install globally using chosen engine
+        # Verify the main package artifact from its manifest URL before global install.
+        # The frozen-lockfile step verifies registry integrity, but pkg_entry["url"]
+        # may point outside the registry (GitHub tarball, mirror, etc.).
+        pkg_hash = pkg_entry.get("hash", "")
+        install_spec = pkg_entry["url"]
+        verified_path = None
+
+        if do_verify and pkg_hash:
+            from ..verify import HashMismatchError, download_and_verify
+
+            click.echo(f"Verifying {package} artifact from manifest URL...")
+            try:
+                verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+            except HashMismatchError as exc:
+                raise SystemExit(str(exc))
+            install_spec = f"file://{verified_path}"
+            click.echo("Artifact hash verified.")
+        elif do_verify and not pkg_hash:
+            click.echo(f"Warning: no hash in record for {package}, skipping verification.")
+
         _check_engine(engine)
-        subprocess.run(
-            [engine, "install", "-g", f"{package}@{version}", *extra_args],
-            check=True,
-        )
+        try:
+            subprocess.run(
+                [engine, "install", "-g", install_spec, *extra_args],
+                check=True,
+            )
+        finally:
+            if verified_path:
+                verified_path.unlink(missing_ok=True)
     return None
 
 

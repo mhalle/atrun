@@ -27,6 +27,8 @@ PACKAGE_TYPES = {
     "go": "dev.atpub.defs#goModule",
 }
 
+PACKAGE_TYPE_TO_ECOSYSTEM = {v: k for k, v in PACKAGE_TYPES.items()}
+
 
 def get_ecosystem(name: str) -> ModuleType:
     """Return the ecosystem module for the given name.
@@ -40,16 +42,23 @@ def get_ecosystem(name: str) -> ModuleType:
     return importlib.import_module(rel, package=__name__)
 
 
-def detect_ecosystem_from_resolved(resolved: list[dict]) -> str:
-    """Detect the ecosystem from URL patterns in resolved entries.
+def detect_ecosystem_from_resolved(resolved: list[dict], record: dict | None = None) -> str:
+    """Detect the ecosystem from a record's packageType or URL patterns.
 
-    Checks the first resolved entry's URL against known patterns:
+    If a record with a packageType is provided, looks it up first.
+    Otherwise checks the first resolved entry's URL against known patterns:
       - crates.io -> 'rust'
       - registry.npmjs.org -> 'node'
       - .whl or files.pythonhosted.org -> 'python'
 
     Falls back to 'python' if no pattern matches.
     """
+    if record is not None:
+        pkg_type = record.get("packageType")
+        if pkg_type:
+            eco = PACKAGE_TYPE_TO_ECOSYSTEM.get(pkg_type)
+            if eco:
+                return eco
     if not resolved:
         return "python"
     url = resolved[0].get("url", "")

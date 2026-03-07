@@ -155,7 +155,7 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
             ts = _decode_tid_timestamp(m.group(3))
 
         from .ecosystems import detect_ecosystem_from_resolved
-        eco_name = detect_ecosystem_from_resolved(value.get("resolved", []))
+        eco_name = detect_ecosystem_from_resolved(value.get("resolved", []), record=value)
 
         entry = {
             "uri": rec["uri"],
@@ -436,7 +436,7 @@ def generate_requirements(resolved: list[dict], record: dict | None = None) -> s
     """
     if record is not None:
         from .ecosystems import detect_ecosystem_from_resolved, get_ecosystem
-        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []))
+        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []), record=record)
         eco_mod = get_ecosystem(eco_name)
         return eco_mod.format_resolve_output(resolved)
 
@@ -474,7 +474,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
     if not package:
         raise SystemExit("Record has no 'package' field — cannot determine what to run.")
 
-    eco_name = detect_ecosystem_from_resolved(resolved)
+    eco_name = detect_ecosystem_from_resolved(resolved, record=record)
     eco_mod = get_ecosystem(eco_name)
 
     import os
@@ -522,9 +522,9 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
             pkg_spec = f"file://{verified_path}"
         elif do_verify and not pkg_hash:
             print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-            pkg_spec = f"{package}@{pkg_entry['version']}"
+            pkg_spec = pkg_entry["url"]
         else:
-            pkg_spec = f"{package}@{pkg_entry['version']}"
+            pkg_spec = pkg_entry["url"]
 
         selected_engine = engine or "pnpm"
         if selected_engine == "bun":

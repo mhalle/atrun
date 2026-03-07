@@ -152,6 +152,14 @@ def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
     parts = stem.split("-")
     if len(parts) < 2:
         raise SystemExit(f"Cannot parse distribution filename: {filename}")
+    # Wheels use underscores in name (PEP 427), so simple split works.
+    # For sdists/tarballs, find the version boundary: first part that starts
+    # with a digit or 'v' followed by a digit (e.g. v1.2.3).
+    if not filename.endswith(".whl"):
+        for i in range(1, len(parts)):
+            p = parts[i]
+            if p and (p[0].isdigit() or (p[0] == "v" and len(p) > 1 and p[1].isdigit())):
+                return "-".join(parts[:i]), "-".join(parts[i:])
     return parts[0], parts[1]
 
 
@@ -175,6 +183,15 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
             # Unescape module path (!x -> X)
             module = re.sub(r"!([a-z])", lambda m: m.group(1).upper(), m.group(1))
             return module, m.group(2)
+    # npm scoped packages: registry.npmjs.org/@scope/pkg/-/pkg-version.tgz
+    if "registry.npmjs.org" in url and "/@" in url:
+        import re
+        m = re.search(r"registry\.npmjs\.org/(@[^/]+/[^/]+)/-/", url)
+        if m:
+            scoped_name = m.group(1)
+            filename = url.rsplit("/", 1)[-1]
+            _, version = _name_version_from_dist_filename(filename)
+            return scoped_name, version
     filename = url.rsplit("/", 1)[-1]
     return _name_version_from_dist_filename(filename)
 

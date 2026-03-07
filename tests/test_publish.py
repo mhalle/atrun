@@ -22,6 +22,26 @@ def test_filename_tgz():
     assert _name_version_from_dist_filename("cowsay-1.6.0.tgz") == ("cowsay", "1.6.0")
 
 
+def test_filename_hyphenated_name_tar_gz():
+    assert _name_version_from_dist_filename("my-package-1.2.3.tar.gz") == ("my-package", "1.2.3")
+
+
+def test_filename_hyphenated_name_tgz():
+    assert _name_version_from_dist_filename("string-width-4.2.3.tgz") == ("string-width", "4.2.3")
+
+
+def test_filename_multi_hyphen_name():
+    assert _name_version_from_dist_filename("my-cool-package-2.0.0.tgz") == ("my-cool-package", "2.0.0")
+
+
+def test_filename_v_prefixed_version():
+    assert _name_version_from_dist_filename("my-package-v1.2.3.tar.gz") == ("my-package", "v1.2.3")
+
+
+def test_filename_v_prefixed_tgz():
+    assert _name_version_from_dist_filename("my-tool-v0.9.0.tgz") == ("my-tool", "v0.9.0")
+
+
 def test_filename_no_version():
     with pytest.raises(SystemExit, match="Cannot parse"):
         _name_version_from_dist_filename("noversion")
@@ -48,6 +68,14 @@ def test_url_npm_fallback_to_filename():
     )
     assert name == "cowsay"
     assert version == "1.6.0"
+
+
+def test_url_npm_scoped_package():
+    name, version = _name_version_from_dist_url(
+        "https://registry.npmjs.org/@babel/core/-/core-7.24.0.tgz"
+    )
+    assert name == "@babel/core"
+    assert version == "7.24.0"
 
 
 def test_url_golang_uppercase_escape():

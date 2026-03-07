@@ -483,7 +483,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in resolved list.")
 
-        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []))
+        eco_name = detect_ecosystem_from_resolved(record.get("resolved", []), record=record)
         eco_mod = get_ecosystem(eco_name)
         metadata = eco_mod.fetch_metadata(pkg_entry["url"])
 
@@ -764,7 +764,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             reason_str = f": {reason}" if reason else ""
             raise click.ClickException(f"This version has been yanked{reason_str}. Use a different version or install via the dist URL directly.")
 
-    eco_name = detect_ecosystem_from_resolved(resolved)
+    eco_name = detect_ecosystem_from_resolved(resolved, record=record)
     eco_mod = get_ecosystem(eco_name)
 
     version = record.get("version", "")
@@ -857,14 +857,14 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             engine_kwargs["engine"] = engine
 
         if use_verified:
-            result = eco_mod.run_verified_install(record, extra_args=extra_args, dry_run=install_dry_run, **engine_kwargs)
+            result = eco_mod.run_verified_install(record, extra_args=extra_args, dry_run=install_dry_run, do_verify=do_verify, **engine_kwargs)
             if install_dry_run and result:
                 click.echo(shlex.join(result))
         else:
             # Direct install — verify hash then use local tarball
             pkg_entry = next((e for e in resolved if e["name"] == package), None)
             verified_path = None
-            pkg_spec = f"{package}@{pkg_entry['version']}" if pkg_entry else package
+            pkg_spec = pkg_entry["url"] if pkg_entry else package
 
             if do_verify and pkg_entry:
                 pkg_hash = pkg_entry.get("hash", "")

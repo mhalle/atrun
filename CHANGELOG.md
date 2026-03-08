@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.1
+
+- Add `remove` command for permanently deleting published records (with confirmation prompt, `--yes` to skip)
+- Add `--force` flag to `publish` to allow republishing the same package@version
+- Require `--dist-url` or `--dist-file` when publishing — prevents accidental dependency-only records
+- `list` command defaults to current session handle when no target is given
+- Upload wheel and sdist to GitHub Releases in CI workflow (enables `gh:` shorthand)
+- README: document per-ecosystem verification and installation, add validation disclaimer
+
 ## 0.15.0
 
 - Per-project credential sessions: store one session file per handle under `~/.config/atrun/sessions/`

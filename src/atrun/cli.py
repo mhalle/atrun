@@ -53,7 +53,8 @@ def login(handle: str):
 @click.option("--post", is_flag=True, help="Create a Bluesky post with a link card embedding the published record.")
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
 @click.option("--handle", "pub_handle", default=None, help="Bluesky handle to publish as. Overrides project config discovery.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool, pub_handle: str | None):
+@click.option("--force", is_flag=True, help="Publish even if the same package@version already exists.")
+def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool, pub_handle: str | None, force: bool):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
@@ -72,6 +73,15 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
     """
     from .publish import build_record, publish as do_publish
 
+    if not dist_file and not dist_url:
+        raise click.ClickException(
+            "No distribution specified. Provide --dist-url or --dist-file.\n"
+            "Examples:\n"
+            "  atrun publish --dist-url npm:cowsay\n"
+            "  atrun publish --dist-url gh:me/mypackage@v1.0.0\n"
+            "  atrun publish --dist-file dist/mypackage-1.0.0-py3-none-any.whl --dist-url https://example.com/mypackage-1.0.0.whl"
+        )
+
     lockfile_str = None
     if lockfile == "-":
         lockfile_str = sys.stdin.read()
@@ -83,7 +93,7 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         click.echo(json.dumps(record, indent=2))
         return
 
-    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post, handle=pub_handle)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post, handle=pub_handle, force=force)
     click.echo(record_uri)
     if post_uri:
         # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL
@@ -95,35 +105,49 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
 
 
 @cli.command(name="list")
-@click.argument("target")
+@click.argument("target", required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON array.")
-def list_cmd(target: str, as_json: bool):
+def list_cmd(target: str | None, as_json: bool):
     """List packages or versions published by a user.
 
     TARGET is either @handle (list all packages) or @handle:package
-    (list all versions of a package).
+    (list all versions of a package). If omitted, defaults to the
+    current session handle (from project config, env, or last login).
 
     \b
     Examples:
+      atrun list
       atrun list @alice.bsky.social
       atrun list @alice.bsky.social:ripgrep
       atrun list --json @alice.bsky.social
     """
     from .run import fetch_yanks, list_records
 
-    # Parse target: @handle or @handle:package
-    if not target.startswith("@"):
-        raise click.ClickException("Target must start with @ (e.g. @alice.bsky.social or @alice.bsky.social:package)")
-
-    target = target[1:]  # strip leading @
-    if ":" in target:
-        handle, package = target.split(":", 1)
-        # Strip @version if present
-        if "@" in package:
-            package = package.split("@")[0]
-    else:
-        handle = target
+    if target is None:
+        # Default to current session handle
+        from .auth import load_session
+        try:
+            session = load_session()
+            handle = session.get("handle")
+            if not handle:
+                raise click.ClickException("No handle in session. Provide a target like @alice.bsky.social")
+        except SystemExit:
+            raise click.ClickException("No session found. Provide a target like @alice.bsky.social or run `atrun login` first.")
         package = None
+    else:
+        # Parse target: @handle or @handle:package
+        if not target.startswith("@"):
+            raise click.ClickException("Target must start with @ (e.g. @alice.bsky.social or @alice.bsky.social:package)")
+
+        target = target[1:]  # strip leading @
+        if ":" in target:
+            handle, package = target.split(":", 1)
+            # Strip @version if present
+            if "@" in package:
+                package = package.split("@")[0]
+        else:
+            handle = target
+            package = None
 
     records = list_records(handle, package=package)
 
@@ -338,6 +362,107 @@ def unyank(target: str, unyank_handle: str | None):
     pkg = content.get("package", "?")
     ver = content.get("version", "?")
     click.echo(f"Unyanked {pkg}@{ver}")
+
+
+@cli.command()
+@click.argument("target")
+@click.option("--handle", "remove_handle", default=None, help="Bluesky handle to use. Overrides project config discovery.")
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt.")
+def remove(target: str, remove_handle: str | None, yes: bool):
+    """Permanently delete a published record.
+
+    This is destructive — the record and its CID are gone. Version chains
+    that reference this record via derivedFrom will have a broken link.
+    Any yank records referencing this record are also deleted.
+
+    Prefer `atrun yank` for normal withdrawals. Use remove only when
+    the record should not exist at all (e.g. published to the wrong
+    account, contains secrets).
+
+    TARGET is @handle:package@version or an AT URI.
+
+    \b
+    Examples:
+      atrun remove @alice.bsky.social:cowsay@1.6.0
+      atrun remove --yes at://did:plc:abc/dev.atpub.manifest/3mgxyz
+    """
+    from .auth import load_session, refresh_session
+    from .run import AT_URI_RE, fetch_record
+
+    result = fetch_record(target)
+    at_info = result.get("at")
+    if not at_info or "uri" not in at_info:
+        raise click.ClickException("Cannot remove: record has no AT Protocol envelope.")
+
+    session = load_session(handle=remove_handle)
+    did = session["did"]
+
+    # Verify the record belongs to this user
+    if at_info.get("did") and at_info["did"] != did:
+        raise click.ClickException(f"Cannot remove: record belongs to {at_info.get('handle', at_info['did'])}, not you.")
+
+    content = result.get("content", {})
+    pkg = content.get("package")
+    ver = content.get("version")
+    target_uri = at_info["uri"]
+
+    # Build a human-readable label for the record
+    if pkg and ver:
+        label = f"{pkg}@{ver}"
+    elif pkg:
+        label = pkg
+    else:
+        label = target_uri
+
+    if not yes:
+        click.echo(f"This will permanently delete {label}")
+        if pkg:
+            click.echo(f"  {target_uri}")
+        click.echo("This cannot be undone. Version chains referencing this record will break.")
+        if not click.confirm("Continue?"):
+            raise SystemExit("Aborted.")
+
+    # Delete any yank records that reference this record
+    import httpx
+    resp = httpx.get(
+        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        params={"repo": did, "collection": "dev.atpub.yank", "limit": 100},
+    )
+    if resp.status_code == 200:
+        for rec in resp.json().get("records", []):
+            subject = rec.get("value", {}).get("subject", {})
+            if subject.get("uri") == target_uri:
+                m = AT_URI_RE.match(rec["uri"])
+                if m:
+                    httpx.post(
+                        "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
+                        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+                        json={"repo": did, "collection": "dev.atpub.yank", "rkey": m.group(3)},
+                    )
+                    click.echo(f"Deleted yank record for {label}")
+
+    # Delete the manifest record
+    m = AT_URI_RE.match(target_uri)
+    if not m:
+        raise click.ClickException(f"Invalid record URI: {target_uri}")
+    rkey = m.group(3)
+
+    resp = httpx.post(
+        "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        json={"repo": did, "collection": "dev.atpub.manifest", "rkey": rkey},
+    )
+    data = resp.json() if resp.content else {}
+    if data.get("error") in ("ExpiredToken", "InvalidToken"):
+        session = refresh_session(session, handle=remove_handle)
+        resp = httpx.post(
+            "https://bsky.social/xrpc/com.atproto.repo.deleteRecord",
+            headers={"Authorization": f"Bearer {session['accessJwt']}"},
+            json={"repo": did, "collection": "dev.atpub.manifest", "rkey": rkey},
+        )
+
+    click.echo(f"Removed {label}")
 
 
 @cli.command()

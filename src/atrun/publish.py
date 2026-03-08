@@ -414,6 +414,7 @@ def publish(
     no_derived_from: bool = False,
     post: bool = False,
     handle: str | None = None,
+    force: bool = False,
 ) -> str:
     """Build and publish a record to AT Protocol.
 
@@ -432,8 +433,16 @@ def publish(
     session = load_session(handle=handle)
     did = session["did"]
 
-    # Auto-link to previous version if not explicitly provided or suppressed
+    # Check for duplicate publish
     package = record.get("package")
+    version = record.get("version")
+    if package and version and not force:
+        existing = _find_duplicate_record(session, did, package, version, record.get("packageType"))
+        if existing:
+            raise SystemExit(
+                f"{package}@{version} is already published: {existing}\n"
+                f"Use --force to publish again."
+            )
     if package and "derivedFrom" not in record and not no_derived_from:
         prev = _find_previous_record(session, did, package, record.get("packageType"))
         if prev:
@@ -458,6 +467,30 @@ def publish(
         post_uri = post_resp.get("uri")
 
     return record_uri, post_uri
+
+
+def _find_duplicate_record(session: dict, did: str, package: str, version: str, package_type: str | None = None) -> str | None:
+    """Check if an identical package+version record already exists.
+
+    Returns the AT URI of the existing record if found, None otherwise.
+    """
+    resp = httpx.get(
+        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
+        headers={"Authorization": f"Bearer {session['accessJwt']}"},
+        params={"repo": did, "collection": COLLECTION, "limit": 100, "reverse": False},
+    )
+    if resp.status_code != 200:
+        return None
+    for rec in resp.json().get("records", []):
+        value = rec.get("value", {})
+        if value.get("package") != package:
+            continue
+        if value.get("version") != version:
+            continue
+        if package_type and value.get("packageType") != package_type:
+            continue
+        return rec["uri"]
+    return None
 
 
 def _find_previous_record(session: dict, did: str, package: str, package_type: str | None = None) -> dict | None:

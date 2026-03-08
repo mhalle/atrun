@@ -20,7 +20,7 @@ def test_parse_lockfile_basic(pylock_toml_content):
     assert "click" in names
     assert "httpx" in names
     assert all("digest" in e for e in entries)
-    assert all("url" in e for e in entries)
+    assert all("urls" in e for e in entries)
 
 
 def test_parse_lockfile_sorted(pylock_toml_content):
@@ -39,7 +39,7 @@ def test_parse_lockfile_sdist_fallback(pylock_toml_sdist):
     entries = parse_lockfile(pylock_toml_sdist)
     assert len(entries) == 1
     assert entries[0]["name"] == "bar"
-    assert entries[0]["url"].endswith(".tar.gz")
+    assert entries[0]["urls"][0].endswith(".tar.gz")
 
 
 def test_parse_lockfile_requires_python_metadata():
@@ -87,7 +87,7 @@ def test_extract_hash_empty():
 
 def test_generate_requirements():
     resolved = [
-        {"name": "click", "url": "https://example.com/click.whl", "digest": "sha256:abc"},
+        {"name": "click", "urls": ["https://example.com/click.whl"], "digest": "sha256:abc"},
     ]
     result = generate_requirements(resolved)
     assert "click @ https://example.com/click.whl --hash=sha256:abc" in result
@@ -96,7 +96,7 @@ def test_generate_requirements():
 def test_generate_install_args():
     record = {
         "package": "atrun",
-        "artifacts": [{"name": "atrun", "version": "0.5.0", "url": "https://example.com/atrun.whl"}],
+        "artifacts": [{"name": "atrun", "version": "0.5.0", "urls": ["https://example.com/atrun.whl"]}],
     }
     args = generate_install_args(record)
     assert args[0] == "uv"

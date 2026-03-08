@@ -55,6 +55,10 @@
             "type": "object",
             "description": "Free-form metadata specific to the package type. Keys use camelCase per AT Protocol conventions."
           },
+          "root": {
+            "type": "integer",
+            "description": "Index of the primary artifact in the artifacts array."
+          },
           "artifacts": {
             "type": "array",
             "items": { "type": "ref", "ref": "#artifact" },
@@ -90,9 +94,11 @@
           "description": "Content digest in algo:hex format (e.g. sha256:abcdef...).",
           "maxLength": 256
         },
-        "url": {
-          "type": "string",
-          "format": "uri"
+        "urls": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" },
+          "maxLength": 16,
+          "description": "Download URLs, evaluated first to last."
         },
         "artifactType": {
           "type": "string",
@@ -101,9 +107,9 @@
         },
         "dependencies": {
           "type": "array",
-          "description": "Direct dependencies as name@version strings.",
-          "items": { "type": "string", "maxLength": 320 },
-          "maxLength": 256
+          "items": { "type": "integer" },
+          "maxLength": 256,
+          "description": "Indices of direct dependencies in the artifacts array."
         },
         "metadata": {
           "type": "object",

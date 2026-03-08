@@ -143,7 +143,7 @@ def parse_lockfile(content: str) -> list[dict]:
                     "name": name,
                     "version": tag,
                     "digest": digest,
-                    "url": _build_oci_url(name, tag),
+                    "urls": [_build_oci_url(name, tag)],
                     "artifactType": "image",
                 }
                 platform = svc.get("platform")
@@ -168,7 +168,7 @@ def parse_lockfile(content: str) -> list[dict]:
             "name": name,
             "version": tag,
             "digest": digest,
-            "url": _build_oci_url(name, tag),
+            "urls": [_build_oci_url(name, tag)],
             "artifactType": "image",
         })
 

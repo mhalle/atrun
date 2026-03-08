@@ -444,7 +444,7 @@ def generate_requirements(artifacts: list[dict], record: dict | None = None) -> 
     lines = []
     for entry in artifacts:
         name = entry["name"]
-        url = entry["url"]
+        url = entry["urls"][0]
         hash_str = entry.get("digest", entry.get("sha256", ""))
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
@@ -471,6 +471,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         raise SystemExit("Record has no resolved packages.")
 
     package = record.get("package")
+    root_idx = record.get("root")
     if not package:
         # For multi-image container records, suggest using docker compose directly
         eco_name = detect_ecosystem_from_artifacts(artifacts, record=record)
@@ -507,11 +508,14 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         os.execvp(cmd[0], cmd)
 
     if eco_name == "python":
-        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
+        if root_idx is not None and root_idx < len(artifacts):
+            pkg_entry = artifacts[root_idx]
+        else:
+            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
             raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-        pkg_url = pkg_entry["url"]
+        pkg_url = pkg_entry["urls"][0]
         pkg_hash = pkg_entry.get("digest", "")
 
         if do_verify and pkg_hash:
@@ -530,7 +534,10 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         cmd = ["uvx", "--from", f"{package} @ {pkg_url}", package]
         os.execvp(cmd[0], cmd)
     elif eco_name == "node":
-        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
+        if root_idx is not None and root_idx < len(artifacts):
+            pkg_entry = artifacts[root_idx]
+        else:
+            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
             raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
@@ -542,16 +549,16 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
             print(f"Verifying {package}...", file=sys.stderr)
             try:
-                verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+                verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
             except HashMismatchError as exc:
                 raise SystemExit(str(exc))
             print("Hash verified.", file=sys.stderr)
             pkg_spec = f"file://{verified_path}"
         elif do_verify and not pkg_hash:
             print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-            pkg_spec = pkg_entry["url"]
+            pkg_spec = pkg_entry["urls"][0]
         else:
-            pkg_spec = pkg_entry["url"]
+            pkg_spec = pkg_entry["urls"][0]
 
         selected_engine = engine or "pnpm"
         if selected_engine == "bun":
@@ -562,7 +569,10 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
             cmd = ["pnpx", pkg_spec]
         os.execvp(cmd[0], cmd)
     elif eco_name == "rust":
-        pkg_entry = next((e for e in artifacts if e["name"] == package), None)
+        if root_idx is not None and root_idx < len(artifacts):
+            pkg_entry = artifacts[root_idx]
+        else:
+            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if do_verify and pkg_entry:
             pkg_hash = pkg_entry.get("digest", "")
             if pkg_hash:
@@ -570,7 +580,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
                 print(f"Verifying {package}...", file=sys.stderr)
                 try:
-                    verify_artifact(pkg_entry["url"], pkg_hash)
+                    verify_artifact(pkg_entry["urls"][0], pkg_hash)
                 except HashMismatchError as exc:
                     raise SystemExit(str(exc))
                 print("Hash verified.", file=sys.stderr)

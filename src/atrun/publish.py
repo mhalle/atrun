@@ -101,6 +101,42 @@ def _resolve_go_shorthand(spec: str) -> str:
     return f"https://proxy.golang.org/{escaped}/@v/{version}.zip"
 
 
+def _resolve_pypi_shorthand(spec: str) -> str:
+    """Resolve pypi:name or pypi:name@version to a PyPI wheel URL.
+
+    Without @version, fetches the latest version. Prefers wheels over
+    sdists. Queries the PyPI JSON API to get the actual download URL.
+    """
+    name = spec.removeprefix("pypi:")
+    if "@" in name:
+        name, version = name.rsplit("@", 1)
+    else:
+        version = None
+
+    if version:
+        api_url = f"https://pypi.org/pypi/{name}/{version}/json"
+    else:
+        api_url = f"https://pypi.org/pypi/{name}/json"
+
+    resp = httpx.get(api_url)
+    resp.raise_for_status()
+    data = resp.json()
+
+    urls = data.get("urls", [])
+    # Prefer wheel over sdist
+    for u in urls:
+        if u["url"].endswith(".whl"):
+            return u["url"]
+    for u in urls:
+        if u["url"].endswith(".tar.gz"):
+            return u["url"]
+    if urls:
+        return urls[0]["url"]
+
+    version = version or data.get("info", {}).get("version", "?")
+    raise SystemExit(f"No downloadable files found for {name}@{version} on PyPI")
+
+
 def _resolve_docker_shorthand(spec: str) -> str:
     """Resolve docker:image:tag to an oci:// URL.
 
@@ -305,6 +341,8 @@ def build_record(
         dist_url = _resolve_go_shorthand(dist_url)
     elif dist_url and dist_url.startswith("docker:"):
         dist_url = _resolve_docker_shorthand(dist_url)
+    elif dist_url and dist_url.startswith("pypi:"):
+        dist_url = _resolve_pypi_shorthand(dist_url)
 
     # Determine ecosystem
     if ecosystem is None and lockfile is not None:
@@ -339,7 +377,7 @@ def build_record(
                 "name": name,
                 "version": version,
                 "digest": f"sha256:{sha256}",
-                "url": dist_url,
+                "urls": [dist_url],
             })
             entries.sort(key=lambda e: e["name"])
 
@@ -367,6 +405,7 @@ def build_record(
         pkg_entry = next((e for e in entries if e["name"] == package_name), None)
         if pkg_entry:
             record["version"] = pkg_entry["version"]
+            record["root"] = entries.index(pkg_entry)
     for field in ("description", "license", "url"):
         if field in dist_meta:
             record[field] = dist_meta[field]

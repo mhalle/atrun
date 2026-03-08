@@ -126,11 +126,11 @@ def parse_lockfile(content: str) -> list[dict]:
                     "name": name,
                     "version": version,
                     "digest": hash_str,
-                    "url": resolved_url,
+                    "urls": [resolved_url],
                     "artifactType": "tarball",
                 }
                 if deps:
-                    entry["dependencies"] = deps
+                    entry["_dep_strings"] = deps
 
                 # Collect per-artifact metadata
                 meta: dict[str, str] = {}
@@ -144,6 +144,23 @@ def parse_lockfile(content: str) -> list[dict]:
                 entries.append(entry)
 
     entries.sort(key=lambda e: e["name"])
+
+    # Post-process: convert _dep_strings to deps (index-based)
+    index_map = {(e["name"], e["version"]): i for i, e in enumerate(entries)}
+    for entry in entries:
+        dep_strings = entry.pop("_dep_strings", None)
+        if dep_strings:
+            dep_indices = []
+            for dep_str in dep_strings:
+                at_idx = dep_str.rfind("@", 1)
+                dep_name = dep_str[:at_idx]
+                dep_ver = dep_str[at_idx + 1:]
+                idx = index_map.get((dep_name, dep_ver))
+                if idx is not None:
+                    dep_indices.append(idx)
+            if dep_indices:
+                entry["dependencies"] = dep_indices
+
     return entries
 
 
@@ -217,7 +234,7 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-    return [engine, "install", "-g", pkg_entry["url"]]
+    return [engine, "install", "-g", pkg_entry["urls"][0]]
 
 
 def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
@@ -291,14 +308,12 @@ def _build_pnpm_lockfile(record: dict) -> str:
         packages[key] = pkg_info
 
         # Snapshots: dependency relationships
-        deps = entry.get("dependencies", [])
-        if deps:
+        dep_indices = entry.get("dependencies", [])
+        if dep_indices:
             snap_deps = {}
-            for dep_str in deps:
-                at_idx = dep_str.rfind("@", 1)
-                dep_name = dep_str[:at_idx]
-                dep_ver = dep_str[at_idx + 1:]
-                snap_deps[dep_name] = dep_ver
+            for idx in dep_indices:
+                dep_entry = artifacts[idx]
+                snap_deps[dep_entry["name"]] = dep_entry["version"]
             snapshots[key] = {"dependencies": snap_deps}
         else:
             snapshots[key] = {}
@@ -348,7 +363,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
     if not has_deps:
         # Fallback: direct install without lockfile verification
-        cmd = [engine, "install", "-g", pkg_entry["url"], *extra_args]
+        cmd = [engine, "install", "-g", pkg_entry["urls"][0], *extra_args]
         if dry_run:
             return cmd
         _check_engine(engine)
@@ -362,7 +377,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         click.echo(shlex.join(["pnpm", "install", "--frozen-lockfile"]))
         if do_verify and pkg_hash:
             click.echo(f"# download and verify hash: {pkg_hash}")
-        click.echo(shlex.join([engine, "install", "-g", pkg_entry["url"], *extra_args]))
+        click.echo(shlex.join([engine, "install", "-g", pkg_entry["urls"][0], *extra_args]))
         return None
 
     # Verified install currently requires pnpm (reconstructs pnpm-lock.yaml)
@@ -397,7 +412,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         # The frozen-lockfile step verifies registry integrity, but pkg_entry["url"]
         # may point outside the registry (GitHub tarball, mirror, etc.).
         pkg_hash = pkg_entry.get("digest", "")
-        install_spec = pkg_entry["url"]
+        install_spec = pkg_entry["urls"][0]
         verified_path = None
 
         if do_verify and pkg_hash:
@@ -405,7 +420,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
             click.echo(f"Verifying {package} artifact from manifest URL...")
             try:
-                verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+                verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
             except HashMismatchError as exc:
                 raise SystemExit(str(exc))
             install_spec = f"file://{verified_path}"

@@ -48,7 +48,9 @@ def test_parse_lockfile_resolves_deps(cargo_lock_content):
     entries = parse_lockfile(cargo_lock_content)
     ripgrep = next(e for e in entries if e["name"] == "ripgrep")
     assert "dependencies" in ripgrep
-    assert any("aho-corasick@" in d for d in ripgrep["dependencies"])
+    # deps is now index-based; verify it points to aho-corasick
+    for idx in ripgrep["dependencies"]:
+        assert entries[idx]["name"] == "aho-corasick"
 
 
 def test_parse_lockfile_deduplicates():

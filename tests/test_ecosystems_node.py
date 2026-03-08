@@ -77,7 +77,9 @@ def test_parse_lockfile_resolves_deps(package_lock_json_content):
     entries = parse_lockfile(package_lock_json_content)
     cowsay = next(e for e in entries if e["name"] == "cowsay")
     assert "dependencies" in cowsay
-    assert any("string-width@" in d for d in cowsay["dependencies"])
+    # deps is now index-based; verify it points to string-width
+    for idx in cowsay["dependencies"]:
+        assert entries[idx]["name"] == "string-width"
 
 
 def test_parse_lockfile_skips_root(package_lock_json_content):
@@ -98,7 +100,7 @@ def test_parse_lockfile_constructs_url_when_missing():
     }'''
     entries = parse_lockfile(content)
     assert len(entries) == 1
-    assert entries[0]["url"] == "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz"
+    assert entries[0]["urls"] == ["https://registry.npmjs.org/foo/-/foo-1.0.0.tgz"]
 
 
 def test_parse_lockfile_deduplicates():
@@ -174,7 +176,7 @@ def test_generate_install_args_uses_url(mock_check):
                 "name": "cowsay",
                 "version": "1.6.0",
                 "digest": "sha256:" + "ab" * 32,
-                "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+                "urls": ["https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"],
             },
         ],
     }
@@ -191,14 +193,14 @@ def test_build_pnpm_lockfile():
                 "name": "cowsay",
                 "version": "1.6.0",
                 "digest": "sha256:" + "ab" * 32,
-                "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
-                "dependencies": ["string-width@4.2.3"],
+                "urls": ["https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"],
+                "dependencies": [1],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
                 "digest": "sha256:" + "cd" * 32,
-                "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+                "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
             },
         ],
     }
@@ -222,14 +224,14 @@ def _make_deps_record(package, version, hash_str, url):
                 "name": package,
                 "version": version,
                 "digest": hash_str,
-                "url": url,
-                "dependencies": ["string-width@4.2.3"],
+                "urls": [url],
+                "dependencies": [1],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
                 "digest": "sha256:" + "cd" * 32,
-                "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+                "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
             },
         ],
     }
@@ -311,14 +313,14 @@ def test_run_verified_install_no_hash_uses_raw_url(
                 "name": "cowsay",
                 "version": "1.6.0",
                 "digest": "",
-                "url": "https://example.com/cowsay-1.6.0.tgz",
-                "dependencies": ["string-width@4.2.3"],
+                "urls": ["https://example.com/cowsay-1.6.0.tgz"],
+                "dependencies": [1],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
                 "digest": "sha256:" + "cd" * 32,
-                "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+                "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
             },
         ],
     }

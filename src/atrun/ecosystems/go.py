@@ -64,7 +64,7 @@ def parse_lockfile(content: str) -> list[dict]:
             "name": module,
             "version": version,
             "digest": _convert_h1_hash(hash_str),
-            "url": _module_download_url(module, version),
+            "urls": [_module_download_url(module, version)],
             "artifactType": "module",
         }
         entries.append(entry)

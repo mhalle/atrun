@@ -63,7 +63,8 @@ def detect_ecosystem_from_artifacts(artifacts: list[dict], record: dict | None =
                 return eco
     if not artifacts:
         return "python"
-    url = artifacts[0].get("url", "")
+    urls = artifacts[0].get("urls", [])
+    url = urls[0] if urls else ""
     return detect_ecosystem_from_url(url) or "python"
 
 

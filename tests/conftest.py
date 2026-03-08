@@ -139,13 +139,13 @@ def sample_manifest_record():
                 "name": "cowsay",
                 "version": "1.6.0",
                 "digest": "sha512:0000000000000000",
-                "url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
+                "urls": ["https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"],
             },
             {
                 "name": "string-width",
                 "version": "4.2.3",
                 "digest": "sha512:1111111111111111",
-                "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+                "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
             },
         ],
     }

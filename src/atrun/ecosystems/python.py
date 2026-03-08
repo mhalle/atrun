@@ -42,7 +42,7 @@ def parse_lockfile(content: str) -> list[dict]:
                     "name": name,
                     "version": version,
                     "digest": hash_str,
-                    "url": url,
+                    "urls": [url],
                     "artifactType": "wheel",
                 }
                 if meta:
@@ -59,7 +59,7 @@ def parse_lockfile(content: str) -> list[dict]:
                     "name": name,
                     "version": version,
                     "digest": hash_str,
-                    "url": url,
+                    "urls": [url],
                     "artifactType": "sdist",
                 }
                 if meta:
@@ -95,7 +95,7 @@ def generate_requirements(artifacts: list[dict]) -> str:
     lines = []
     for entry in artifacts:
         name = entry["name"]
-        url = entry["url"]
+        url = entry["urls"][0]
         hash_str = entry.get("digest", "")
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
@@ -113,7 +113,7 @@ def generate_install_args(record: dict) -> list[str]:
 
     return [
         "uv", "tool", "install",
-        f"{package} @ {pkg_entry['url']}",
+        f"{package} @ {pkg_entry['urls'][0]}",
     ]
 
 

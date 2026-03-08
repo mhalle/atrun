@@ -52,7 +52,7 @@ def parse_lockfile(content: str) -> list[dict]:
             "name": name,
             "version": version,
             "digest": f"sha256:{checksum}",
-            "url": _crate_download_url(name, version),
+            "urls": [_crate_download_url(name, version)],
             "artifactType": "crate",
         }
 
@@ -62,21 +62,36 @@ def parse_lockfile(content: str) -> list[dict]:
             for dep in deps:
                 parts = dep.split()
                 if len(parts) >= 2:
-                    # Explicit "name version"
                     dep_list.append(f"{parts[0]}@{parts[1]}")
                 else:
-                    # Bare name — resolve to version
                     dep_versions = pkg_versions.get(dep, [])
                     if len(dep_versions) == 1:
                         dep_list.append(f"{dep}@{dep_versions[0]}")
                     elif dep_versions:
                         dep_list.append(f"{dep}@{dep_versions[0]}")
             if dep_list:
-                entry["dependencies"] = sorted(dep_list)
+                entry["_dep_strings"] = sorted(dep_list)
 
         entries.append(entry)
 
     entries.sort(key=lambda e: e["name"])
+
+    # Post-process: convert _dep_strings to deps (index-based)
+    index_map = {(e["name"], e["version"]): i for i, e in enumerate(entries)}
+    for entry in entries:
+        dep_strings = entry.pop("_dep_strings", None)
+        if dep_strings:
+            dep_indices = []
+            for dep_str in dep_strings:
+                at_idx = dep_str.rfind("@", 1)
+                dep_name = dep_str[:at_idx]
+                dep_ver = dep_str[at_idx + 1:]
+                idx = index_map.get((dep_name, dep_ver))
+                if idx is not None:
+                    dep_indices.append(idx)
+            if dep_indices:
+                entry["dependencies"] = dep_indices
+
     return entries
 
 

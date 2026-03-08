@@ -610,7 +610,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
         pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in artifacts list.")
-        click.echo(pkg_entry["url"])
+        click.echo(pkg_entry["urls"][0])
         return
 
     if registry:
@@ -622,7 +622,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
         eco_name = detect_ecosystem_from_artifacts(record.get("artifacts", []), record=record)
         eco_mod = get_ecosystem(eco_name)
-        metadata = eco_mod.fetch_metadata(pkg_entry["url"])
+        metadata = eco_mod.fetch_metadata(pkg_entry["urls"][0])
 
         if as_json:
             click.echo(json.dumps(metadata, indent=2))
@@ -822,7 +822,7 @@ def verify(target: str, as_json: bool, unsigned: bool):
     if not pkg_hash:
         raise click.ClickException(f"Package '{package}' has no hash in the record.")
 
-    url = pkg_entry["url"]
+    url = pkg_entry["urls"][0]
 
     # Container images use digest verification instead of download
     if url.startswith("oci://"):
@@ -928,7 +928,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     # Container images: use docker save instead of HTTP download
-    eco_url = entries[0].get("url", "") if entries else ""
+    eco_url = entries[0].get("urls", [""])[0] if entries else ""
     if eco_url.startswith("oci://"):
         import subprocess
 
@@ -937,7 +937,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
         failed = []
         for entry in entries:
             name = entry["name"]
-            ref = entry["url"].removeprefix("oci://")
+            ref = entry["urls"][0].removeprefix("oci://")
             pkg_hash = entry.get("digest", "")
             safe_name = name.replace("/", "_")
             dest = dest_dir / f"{safe_name}.tar"
@@ -968,7 +968,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
 
     def _fetch_one(client: httpx.Client, entry: dict) -> tuple[str, Path | None, str | None]:
         name = entry["name"]
-        url = entry["url"]
+        url = entry["urls"][0]
         filename = url.rsplit("/", 1)[-1]
         dest = dest_dir / filename
         expected_hash = entry.get("digest", "") or None if do_verify else None
@@ -1108,7 +1108,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
         # Download and verify main package hash, then use file:// URL
         verified_path = None
-        pkg_url = pkg_entry["url"]
+        pkg_url = pkg_entry["urls"][0]
         pkg_hash = pkg_entry.get("digest", "")
 
         if do_verify and pkg_hash:
@@ -1150,7 +1150,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
                 click.echo(f"Verifying {package}...", err=True)
                 try:
-                    verify_artifact(pkg_entry["url"], pkg_hash)
+                    verify_artifact(pkg_entry["urls"][0], pkg_hash)
                 except HashMismatchError as exc:
                     raise click.ClickException(str(exc))
                 click.echo("Hash verified.", err=True)
@@ -1188,7 +1188,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             # Direct install — verify hash then use local tarball
             pkg_entry = next((e for e in artifacts if e["name"] == package), None)
             verified_path = None
-            pkg_spec = pkg_entry["url"] if pkg_entry else package
+            pkg_spec = pkg_entry["urls"][0] if pkg_entry else package
 
             if do_verify and pkg_entry:
                 pkg_hash = pkg_entry.get("digest", "")
@@ -1197,7 +1197,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
                     click.echo(f"Verifying {package}...", err=True)
                     try:
-                        verified_path = download_and_verify(pkg_entry["url"], pkg_hash)
+                        verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
                     except HashMismatchError as exc:
                         raise click.ClickException(str(exc))
                     pkg_spec = f"file://{verified_path}"

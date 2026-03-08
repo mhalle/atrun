@@ -20,7 +20,7 @@ def test_cli_help():
 
 def _make_record(package, version, hash_str, url, extra_resolved=None):
     """Helper to build a fetch_record-style return value."""
-    artifacts = [{"name": package, "version": version, "digest": hash_str, "url": url}]
+    artifacts = [{"name": package, "version": version, "digest": hash_str, "urls": [url]}]
     if extra_resolved:
         artifacts.extend(extra_resolved)
     return {
@@ -153,11 +153,11 @@ def test_install_dry_run_node_deps_shows_steps(mock_yanks, mock_fetch):
     record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
     record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
     # Add dependency data to trigger the --deps path
-    record["content"]["artifacts"][0]["dependencies"] = ["string-width@4.2.3"]
     record["content"]["artifacts"].append({
         "name": "string-width", "version": "4.2.3",
-        "digest": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        "digest": "sha256:def", "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
     })
+    record["content"]["artifacts"][0]["dependencies"] = [1]
     mock_fetch.return_value = record
 
     runner = CliRunner()
@@ -178,11 +178,11 @@ def test_install_dry_run_node_deps_no_verify_skips_hash(mock_yanks, mock_fetch):
     url = "https://github.com/example/cowsay/releases/download/v1.6.0/cowsay-1.6.0.tgz"
     record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
     record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
-    record["content"]["artifacts"][0]["dependencies"] = ["string-width@4.2.3"]
     record["content"]["artifacts"].append({
         "name": "string-width", "version": "4.2.3",
-        "digest": "sha256:def", "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        "digest": "sha256:def", "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
     })
+    record["content"]["artifacts"][0]["dependencies"] = [1]
     mock_fetch.return_value = record
 
     runner = CliRunner()
@@ -233,7 +233,7 @@ def test_fetch_with_deps(mock_client_cls, mock_fetch, tmp_path):
         extra_resolved=[{
             "name": "string-width", "version": "4.2.3",
             "digest": f"sha256:{digest}",
-            "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+            "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
         }],
     )
     mock_fetch.return_value = record

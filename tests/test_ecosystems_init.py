@@ -46,7 +46,7 @@ def test_detect_url_unknown():
 
 
 def test_detect_resolved_npm():
-    resolved = [{"url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"}]
+    resolved = [{"urls": ["https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"]}]
     assert detect_ecosystem_from_artifacts(resolved) == "node"
 
 
@@ -56,21 +56,21 @@ def test_detect_resolved_empty():
 
 def test_detect_resolved_with_package_type():
     """packageType in record overrides URL-based detection."""
-    resolved = [{"url": "https://example.com/unknown.zip"}]
+    resolved = [{"urls": ["https://example.com/unknown.zip"]}]
     record = {"packageType": "dev.atpub.defs#npmPackage", "artifacts": resolved}
     assert detect_ecosystem_from_artifacts(resolved, record=record) == "node"
 
 
 def test_detect_resolved_package_type_priority():
     """packageType takes priority over URL pattern."""
-    resolved = [{"url": "https://files.pythonhosted.org/packages/foo-1.0.whl"}]
+    resolved = [{"urls": ["https://files.pythonhosted.org/packages/foo-1.0.whl"]}]
     record = {"packageType": "dev.atpub.defs#npmPackage", "artifacts": resolved}
     assert detect_ecosystem_from_artifacts(resolved, record=record) == "node"
 
 
 def test_detect_resolved_unknown_package_type_falls_back():
     """Unknown packageType falls back to URL detection."""
-    resolved = [{"url": "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"}]
+    resolved = [{"urls": ["https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"]}]
     record = {"packageType": "dev.atpub.defs#unknownType", "artifacts": resolved}
     assert detect_ecosystem_from_artifacts(resolved, record=record) == "node"
 
@@ -166,7 +166,7 @@ def test_detect_lockfile_compose_yaml():
 
 
 def test_detect_resolved_container_package_type():
-    resolved = [{"url": "oci://ghcr.io/user/app:1.0.0"}]
+    resolved = [{"urls": ["oci://ghcr.io/user/app:1.0.0"]}]
     record = {"packageType": "dev.atpub.defs#container", "artifacts": resolved}
     assert detect_ecosystem_from_artifacts(resolved, record=record) == "container"
 

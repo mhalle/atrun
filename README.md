@@ -459,6 +459,8 @@ Ecosystem is auto-detected from the lockfile content or distribution URL. You ca
 
 Each ecosystem follows the same general pattern — download the artifact, verify its hash against the digest in the manifest record, then install using the ecosystem's native tool — but the details vary.
 
+Please note that the validation performed by this implementation has not been exhaustively verified. This is an experimental implementation only. The protocol itself has multiple levels of validation that future implementations can take full advantage of.
+
 #### Python
 
 - **Verification:** The wheel is downloaded and its SHA256 (or SHA512) hash is computed and compared against the `digest` field in the manifest. If the hashes match, the verified artifact is used for installation via a `file://` URL. If no hash is available, atrun warns and installs directly from the remote URL.

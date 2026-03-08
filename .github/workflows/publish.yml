@@ -36,5 +36,17 @@ jobs:
         env:
           ATRUN_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
           ATRUN_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
-        run: uv run atrun publish --dist-url gh:${{ github.repository }}@${{ github.ref_name }} --post
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          BASENAME=$(basename "$WHEEL")
+          NAME=$(echo "$BASENAME" | cut -d- -f1)
+          VERSION=$(echo "$BASENAME" | cut -d- -f2)
+          # Wait for PyPI to index, then get the actual download URL
+          sleep 15
+          DIST_URL=$(curl -s "https://pypi.org/pypi/${NAME}/${VERSION}/json" \
+            | python3 -c "import sys,json; urls=json.load(sys.stdin)['urls']; print(next(u['url'] for u in urls if u['url'].endswith('.whl')))")
+          uv run atrun publish \
+            --dist-file "$WHEEL" \
+            --dist-url "$DIST_URL" \
+            --post
         if: env.ATRUN_HANDLE != ''

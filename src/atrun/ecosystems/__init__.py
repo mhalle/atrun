@@ -69,14 +69,22 @@ def detect_ecosystem_from_artifacts(artifacts: list[dict], record: dict | None =
 
 
 def detect_ecosystem_from_url(url: str) -> str | None:
-    """Auto-detect ecosystem from a distribution URL.
+    """Auto-detect ecosystem from a distribution URL or purl.
 
     Recognizes:
+      - pkg:pypi/… or pypi:… -> 'python'
+      - pkg:npm/… or npm:… -> 'node'
+      - pkg:cargo/… or crate:… -> 'rust'
+      - pkg:golang/… or go:… -> 'go'
+      - pkg:docker/… or pkg:oci/… or docker:… -> 'container'
       - registry.npmjs.org -> 'node'
       - files.pythonhosted.org or .whl extension -> 'python'
 
     Returns None if the URL doesn't match a known ecosystem.
     """
+    if url.startswith("pkg:"):
+        from ..purl import detect_ecosystem
+        return detect_ecosystem(url)
     if "registry.npmjs.org" in url:
         return "node"
     if "files.pythonhosted.org" in url or url.endswith(".whl"):

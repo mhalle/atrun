@@ -234,7 +234,9 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-    return [engine, "install", "-g", pkg_entry["urls"][0]]
+    from ..purl import resolve_url
+
+    return [engine, "install", "-g", resolve_url(pkg_entry["urls"][0])]
 
 
 def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
@@ -358,12 +360,16 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         raise SystemExit(f"Package '{package}' not found in artifacts list.")
     version = pkg_entry["version"]
 
+    from ..purl import resolve_url
+
     # Check if record has dependency info for frozen lockfile install
     has_deps = any(e.get("dependencies") for e in artifacts)
 
+    pkg_download_url = resolve_url(pkg_entry["urls"][0])
+
     if not has_deps:
         # Fallback: direct install without lockfile verification
-        cmd = [engine, "install", "-g", pkg_entry["urls"][0], *extra_args]
+        cmd = [engine, "install", "-g", pkg_download_url, *extra_args]
         if dry_run:
             return cmd
         _check_engine(engine)
@@ -377,7 +383,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         click.echo(shlex.join(["pnpm", "install", "--frozen-lockfile"]))
         if do_verify and pkg_hash:
             click.echo(f"# download and verify hash: {pkg_hash}")
-        click.echo(shlex.join([engine, "install", "-g", pkg_entry["urls"][0], *extra_args]))
+        click.echo(shlex.join([engine, "install", "-g", pkg_download_url, *extra_args]))
         return None
 
     # Verified install currently requires pnpm (reconstructs pnpm-lock.yaml)
@@ -412,7 +418,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
         # The frozen-lockfile step verifies registry integrity, but pkg_entry["url"]
         # may point outside the registry (GitHub tarball, mirror, etc.).
         pkg_hash = pkg_entry.get("digest", "")
-        install_spec = pkg_entry["urls"][0]
+        install_spec = pkg_download_url
         verified_path = None
 
         if do_verify and pkg_hash:
@@ -420,7 +426,7 @@ def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run
 
             click.echo(f"Verifying {package} artifact from manifest URL...")
             try:
-                verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
+                verified_path = download_and_verify(pkg_download_url, pkg_hash)
             except HashMismatchError as exc:
                 raise SystemExit(str(exc))
             install_spec = f"file://{verified_path}"

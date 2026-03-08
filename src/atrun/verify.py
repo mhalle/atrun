@@ -72,24 +72,30 @@ def download_and_verify(url: str, expected_hash: str) -> Path:
     resp = httpx.get(url, follow_redirects=True)
     resp.raise_for_status()
 
-    suffix = ""
     filename = url.rsplit("/", 1)[-1]
-    if "." in filename:
-        if filename.endswith(".tar.gz"):
-            suffix = ".tar.gz"
-        else:
-            suffix = "." + filename.rsplit(".", 1)[-1]
-
-    tmp = tempfile.NamedTemporaryFile(prefix="atrun-", suffix=suffix, delete=False)
-    tmp.write(resp.content)
-    tmp.close()
+    # Wheels need exact filename for pip/uv to parse tags
+    if filename.endswith(".whl"):
+        tmpdir = tempfile.mkdtemp(prefix="atrun-")
+        tmp_path = Path(tmpdir) / filename
+        tmp_path.write_bytes(resp.content)
+    else:
+        suffix = ""
+        if "." in filename:
+            if filename.endswith(".tar.gz"):
+                suffix = ".tar.gz"
+            else:
+                suffix = "." + filename.rsplit(".", 1)[-1]
+        tmp = tempfile.NamedTemporaryFile(prefix="atrun-", suffix=suffix, delete=False)
+        tmp.write(resp.content)
+        tmp.close()
+        tmp_path = Path(tmp.name)
 
     actual = hash_bytes(resp.content, algo)
     if actual != expected:
-        Path(tmp.name).unlink(missing_ok=True)
+        tmp_path.unlink(missing_ok=True)
         raise HashMismatchError(url, f"{algo}:{expected}", f"{algo}:{actual}")
 
-    return Path(tmp.name)
+    return tmp_path
 
 
 def download_to(url: str, dest: Path, expected_hash: str | None = None) -> Path:

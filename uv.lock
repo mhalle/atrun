@@ -17,11 +17,12 @@ wheels = [
 
 [[package]]
 name = "atrun"
-version = "0.14.4"
+version = "0.15.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "httpx" },
+    { name = "purl2meta", extra = ["fetch"] },
     { name = "pyyaml" },
 ]
 
@@ -34,6 +35,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "purl2meta", extras = ["fetch"], specifier = ">=0.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -126,6 +128,15 @@ wheels = [
 ]
 
 [[package]]
+name = "packageurl-python"
+version = "0.17.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/d6/3b5a4e3cfaef7a53869a26ceb034d1ff5e5c27c814ce77260a96d50ab7bb/packageurl_python-0.17.6.tar.gz", hash = "sha256:1252ce3a102372ca6f86eb968e16f9014c4ba511c5c37d95a7f023e2ca6e5c25", size = 50618, upload-time = "2025-11-24T15:20:17.998Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/2f/c7277b7615a93f51b5fbc1eacfc1b75e8103370e786fd8ce2abf6e5c04ab/packageurl_python-0.17.6-py3-none-any.whl", hash = "sha256:31a85c2717bc41dd818f3c62908685ff9eebcb68588213745b14a6ee9e7df7c9", size = 36776, upload-time = "2025-11-24T15:20:16.962Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -141,6 +152,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "purl2meta"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packageurl-python" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/a0/471f26c7d34e103bd9949f68b6d1dee4c8b89c83024d1e18ec30ab23d9f0/purl2meta-0.1.1.tar.gz", hash = "sha256:7e24d53cf8ff3f0a371266b2d7e8d44af4162ac6d0671c585a0fd12b105c584d", size = 7457, upload-time = "2026-03-08T18:29:11.972Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/99/1952eb741af24ecedef82385d756cd1a74cc3694989291e4e58dbdec2697/purl2meta-0.1.1-py3-none-any.whl", hash = "sha256:02f93e8d032c1941aa9453a0db85aabfdf0b69c81c0424ef340d1eafad3f549b", size = 5203, upload-time = "2026-03-08T18:29:10.548Z" },
+]
+
+[package.optional-dependencies]
+fetch = [
+    { name = "httpx" },
 ]
 
 [[package]]

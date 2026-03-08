@@ -92,10 +92,12 @@ def build_metadata() -> dict:
 
 def generate_requirements(artifacts: list[dict]) -> str:
     """Generate a requirements.txt with --hash pins from artifacts entries."""
+    from ..purl import resolve_url
+
     lines = []
     for entry in artifacts:
         name = entry["name"]
-        url = entry["urls"][0]
+        url = resolve_url(entry["urls"][0])
         hash_str = entry.get("digest", "")
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
@@ -111,16 +113,11 @@ def generate_install_args(record: dict) -> list[str]:
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
+    version = pkg_entry["version"]
     return [
         "uv", "tool", "install",
-        f"{package} @ {pkg_entry['urls'][0]}",
+        f"{package}=={version}",
     ]
-
-
-def generate_run_args(record: dict) -> list[str]:
-    """Build args for running a Python module."""
-    package = record.get("package")
-    return ["uv", "run", package]
 
 
 def fetch_metadata(url: str) -> dict:
@@ -153,33 +150,6 @@ def extract_dist_metadata(url: str) -> dict:
     """Extract standardized metadata from a wheel URL."""
     from ..wheel import fetch_wheel_metadata
     return _metadata_from_wheel_meta(fetch_wheel_metadata(url))
-
-
-def extract_local_dist_metadata(path: "Path") -> dict:
-    """Extract standardized metadata from a local wheel file."""
-    import io
-    import zipfile
-    from email.parser import Parser
-
-    with zipfile.ZipFile(path) as zf:
-        metadata_path = next(
-            (n for n in zf.namelist() if n.endswith(".dist-info/METADATA")),
-            None,
-        )
-        if not metadata_path:
-            return {}
-        raw = zf.read(metadata_path).decode("utf-8")
-
-    msg = Parser().parsestr(raw)
-    meta: dict[str, str | list[str]] = {}
-    for field in ("Summary", "License", "License-Expression", "Home-page"):
-        value = msg.get(field)
-        if value:
-            meta[field] = value
-    project_urls = msg.get_all("Project-URL")
-    if project_urls:
-        meta["Project-URL"] = project_urls
-    return _metadata_from_wheel_meta(meta)
 
 
 def format_resolve_output(artifacts: list[dict]) -> str:

@@ -277,9 +277,8 @@ def test_fetch_no_verify(mock_client_cls, mock_fetch, tmp_path):
     assert (tmp_path / "cowsay-1.6.0.tgz").exists()
 
 
-@patch("atrun.run.fetch_record")
 @patch("atrun.publish.build_record")
-def test_publish_dry_run(mock_build, mock_fetch):
+def test_publish_dry_run(mock_build):
     mock_build.return_value = {
         "$type": "dev.atpub.manifest",
         "package": "cowsay",
@@ -290,6 +289,58 @@ def test_publish_dry_run(mock_build, mock_fetch):
 
     runner = CliRunner()
     result = runner.invoke(cli, ["publish", "--dry-run", "--dist-url", "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"])
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     output = json.loads(result.output)
     assert output["package"] == "cowsay"
+    # Verify build_record received dist_urls as a tuple
+    _, kwargs = mock_build.call_args
+    assert kwargs.get("dist_urls") == ("https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",)
+
+
+@patch("atrun.publish.build_record")
+def test_publish_dry_run_multiple_urls(mock_build):
+    mock_build.return_value = {
+        "$type": "dev.atpub.manifest",
+        "package": "requests",
+        "version": "2.31.0",
+        "artifacts": [],
+        "createdAt": "2024-01-01T00:00:00Z",
+    }
+
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "publish", "--dry-run",
+        "--dist-url", "pkg:pypi/requests@2.31.0",
+        "--dist-url", "https://github.com/psf/requests/archive/v2.31.0.tar.gz",
+    ])
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock_build.call_args
+    assert kwargs.get("dist_urls") == (
+        "pkg:pypi/requests@2.31.0",
+        "https://github.com/psf/requests/archive/v2.31.0.tar.gz",
+    )
+
+
+@patch("atrun.publish.build_record")
+def test_publish_dry_run_metadata_flags(mock_build):
+    mock_build.return_value = {
+        "$type": "dev.atpub.manifest",
+        "package": "cowsay",
+        "version": "1.6.0",
+        "artifacts": [],
+        "createdAt": "2024-01-01T00:00:00Z",
+    }
+
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "publish", "--dry-run",
+        "--dist-url", "npm:cowsay",
+        "--description", "ASCII cow",
+        "--license", "MIT",
+        "--url", "https://example.com",
+    ])
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock_build.call_args
+    assert kwargs.get("description") == "ASCII cow"
+    assert kwargs.get("license") == "MIT"
+    assert kwargs.get("url") == "https://example.com"

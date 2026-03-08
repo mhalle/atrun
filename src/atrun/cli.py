@@ -44,8 +44,7 @@ def login(handle: str):
 
 @cli.command()
 @click.option("--lockfile", type=click.Path(), help="Path to lockfile, or '-' for stdin. Omit to auto-export via the ecosystem's default tool.")
-@click.option("--dist-file", type=click.Path(exists=True, path_type=Path), help="Local distribution file (wheel, tarball) to hash and include.")
-@click.option("--dist-url", help="Public URL where the distribution is hosted. Used as the download URL in the record. If --dist-file is also given, hashes are verified to match.")
+@click.option("--dist-url", multiple=True, help="Public URL, package URL (pkg:pypi/name@ver), or shorthand for the distribution. Can be specified multiple times; all go into the artifact's urls array.")
 @click.option("--ecosystem", "eco", type=click.Choice(["python", "node", "rust", "go", "container"]), default=None, help="Target ecosystem. Auto-detected from lockfile content or dist URL if omitted.")
 @click.option("--deps", is_flag=True, help="Include the full dependency graph in the record, enabling frozen lockfile verification on install.")
 @click.option("--derived-from", "derived_from", multiple=True, help="AT URI, XRPC URL, or bsky.app URL of a record this derives from. Can be specified multiple times. Auto-detected from previous versions if omitted.")
@@ -54,11 +53,14 @@ def login(handle: str):
 @click.option("--dry-run", is_flag=True, help="Print the record as JSON without publishing to AT Protocol.")
 @click.option("--handle", "pub_handle", default=None, help="Bluesky handle to publish as. Overrides project config discovery.")
 @click.option("--force", is_flag=True, help="Publish even if the same package@version already exists.")
-def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool, pub_handle: str | None, force: bool):
+@click.option("--description", default=None, help="Package description (overrides extracted metadata).")
+@click.option("--license", "license_", default=None, help="SPDX license identifier (overrides extracted metadata).")
+@click.option("--url", "url_", default=None, help="Package homepage URL (overrides extracted metadata).")
+def publish(lockfile: str | None, dist_url: tuple[str, ...], eco: str | None, deps: bool, derived_from: tuple[str, ...], no_derived_from: bool, post: bool, dry_run: bool, pub_handle: str | None, force: bool, description: str | None, license_: str | None, url_: str | None):
     """Publish a package record to AT Protocol.
 
     Parses the lockfile, hashes the distribution artifact, extracts metadata
-    (description, license, url) from the dist file, and creates a
+    (description, license, url) from the dist or registry, and creates a
     dev.atpub.manifest record on the authenticated user's AT Protocol repo.
 
     Without --lockfile, auto-exports using the ecosystem's default tool
@@ -67,19 +69,20 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
 
     \b
     Examples:
-      atrun publish --dist-url https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz
-      atrun publish --lockfile pylock.toml --dist-file dist/pkg-1.0.whl --dist-url https://example.com/pkg-1.0.whl
-      atrun publish --dist-url https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz --lockfile package-lock.json --deps
+      atrun publish --dist-url pkg:pypi/requests@2.31.0
+      atrun publish --dist-url npm:cowsay
+      atrun publish --dist-url pkg:pypi/requests@2.31.0 --dist-url https://github.com/psf/requests/archive/v2.31.0.tar.gz
+      atrun publish --dist-url npm:cowsay --description "ASCII cow" --license MIT
     """
     from .publish import build_record, publish as do_publish
 
-    if not dist_file and not dist_url:
+    if not dist_url:
         raise click.ClickException(
-            "No distribution specified. Provide --dist-url or --dist-file.\n"
+            "No distribution specified. Provide --dist-url.\n"
             "Examples:\n"
+            "  atrun publish --dist-url pkg:pypi/requests@2.31.0\n"
             "  atrun publish --dist-url npm:cowsay\n"
-            "  atrun publish --dist-url gh:me/mypackage@v1.0.0\n"
-            "  atrun publish --dist-file dist/mypackage-1.0.0-py3-none-any.whl --dist-url https://example.com/mypackage-1.0.0.whl"
+            "  atrun publish --dist-url https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz"
         )
 
     lockfile_str = None
@@ -89,11 +92,11 @@ def publish(lockfile: str | None, dist_file: Path | None, dist_url: str | None, 
         lockfile_str = Path(lockfile).read_text()
 
     if dry_run:
-        record = build_record(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None)
+        record = build_record(lockfile=lockfile_str, dist_urls=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, description=description, license=license_, url=url_)
         click.echo(json.dumps(record, indent=2))
         return
 
-    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_file=dist_file, dist_url=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post, handle=pub_handle, force=force)
+    record_uri, post_uri = do_publish(lockfile=lockfile_str, dist_urls=dist_url, ecosystem=eco, strip_deps=not deps, derived_from=derived_from or None, no_derived_from=no_derived_from, post=post, handle=pub_handle, force=force, description=description, license=license_, url=url_)
     click.echo(record_uri)
     if post_uri:
         # Convert at://did/app.bsky.feed.post/rkey to bsky.app URL
@@ -615,6 +618,8 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
     if registry:
         # Fetch full metadata from ecosystem registry
+        from .purl import resolve_url
+
         artifacts = record.get("artifacts", [])
         pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
@@ -622,7 +627,7 @@ def info(uri: str, as_json: bool, raw: bool, show_dist: bool, registry: bool, ve
 
         eco_name = detect_ecosystem_from_artifacts(record.get("artifacts", []), record=record)
         eco_mod = get_ecosystem(eco_name)
-        metadata = eco_mod.fetch_metadata(pkg_entry["urls"][0])
+        metadata = eco_mod.fetch_metadata(resolve_url(pkg_entry["urls"][0]))
 
         if as_json:
             click.echo(json.dumps(metadata, indent=2))
@@ -822,7 +827,8 @@ def verify(target: str, as_json: bool, unsigned: bool):
     if not pkg_hash:
         raise click.ClickException(f"Package '{package}' has no hash in the record.")
 
-    url = pkg_entry["urls"][0]
+    from .purl import resolve_url
+    url = resolve_url(pkg_entry["urls"][0])
 
     # Container images use digest verification instead of download
     if url.startswith("oci://"):
@@ -927,8 +933,10 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
     dest_dir = Path(directory)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    from .purl import resolve_url
+
     # Container images: use docker save instead of HTTP download
-    eco_url = entries[0].get("urls", [""])[0] if entries else ""
+    eco_url = resolve_url(entries[0].get("urls", [""])[0]) if entries else ""
     if eco_url.startswith("oci://"):
         import subprocess
 
@@ -937,7 +945,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
         failed = []
         for entry in entries:
             name = entry["name"]
-            ref = entry["urls"][0].removeprefix("oci://")
+            ref = resolve_url(entry["urls"][0]).removeprefix("oci://")
             pkg_hash = entry.get("digest", "")
             safe_name = name.replace("/", "_")
             dest = dest_dir / f"{safe_name}.tar"
@@ -968,7 +976,7 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
 
     def _fetch_one(client: httpx.Client, entry: dict) -> tuple[str, Path | None, str | None]:
         name = entry["name"]
-        url = entry["urls"][0]
+        url = resolve_url(entry["urls"][0])
         filename = url.rsplit("/", 1)[-1]
         dest = dest_dir / filename
         expected_hash = entry.get("digest", "") or None if do_verify else None
@@ -1065,6 +1073,8 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             reason_str = f": {reason}" if reason else ""
             raise click.ClickException(f"This version has been yanked{reason_str}. Use a different version or install via the dist URL directly.")
 
+    from .purl import resolve_url as _resolve_url
+
     eco_name = detect_ecosystem_from_artifacts(artifacts, record=record)
     eco_mod = get_ecosystem(eco_name)
 
@@ -1095,51 +1105,23 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
         return
 
     if eco_name == "python":
-        # Python: use uv tool install with requirements file
+        # Python: let uv resolve the right wheel for the platform
         pkg_entry = next((e for e in artifacts if e["name"] == package), None)
         if not pkg_entry:
             raise click.ClickException(f"Package '{package}' not found in artifacts list.")
 
-        requirements = generate_requirements(artifacts, record=record)
+        version = pkg_entry["version"]
+        cmd = [
+            "uv", "tool", "install",
+            f"{package}=={version}",
+            *extra_args,
+        ]
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="atrun-", delete=False) as f:
-            f.write(requirements)
-            req_path = f.name
+        if install_dry_run:
+            click.echo(shlex.join(cmd))
+            return
 
-        # Download and verify main package hash, then use file:// URL
-        verified_path = None
-        pkg_url = pkg_entry["urls"][0]
-        pkg_hash = pkg_entry.get("digest", "")
-
-        if do_verify and pkg_hash:
-            from .verify import HashMismatchError, download_and_verify
-
-            click.echo(f"Verifying {package}...", err=True)
-            try:
-                verified_path = download_and_verify(pkg_url, pkg_hash)
-            except HashMismatchError as exc:
-                raise click.ClickException(str(exc))
-            pkg_url = f"file://{verified_path}"
-            click.echo("Hash verified.", err=True)
-        elif do_verify and not pkg_hash:
-            click.echo(f"Warning: no hash in record for {package}, skipping verification.", err=True)
-
-        try:
-            cmd = [
-                "uv", "tool", "install",
-                f"{package} @ {pkg_url}",
-                "--with-requirements", req_path,
-                *extra_args,
-            ]
-
-            if install_dry_run:
-                click.echo(shlex.join(cmd))
-                return
-
-            subprocess.run(cmd, check=True)
-        finally:
-            if verified_path:
-                verified_path.unlink(missing_ok=True)
+        subprocess.run(cmd, check=True)
     elif eco_name in ("rust", "go"):
         # Rust: verify artifact hash before cargo install (Go: skip, h1: tree hashes)
         if eco_name == "rust" and do_verify:
@@ -1150,7 +1132,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
                 click.echo(f"Verifying {package}...", err=True)
                 try:
-                    verify_artifact(pkg_entry["urls"][0], pkg_hash)
+                    verify_artifact(_resolve_url(pkg_entry["urls"][0]), pkg_hash)
                 except HashMismatchError as exc:
                     raise click.ClickException(str(exc))
                 click.echo("Hash verified.", err=True)
@@ -1188,7 +1170,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             # Direct install — verify hash then use local tarball
             pkg_entry = next((e for e in artifacts if e["name"] == package), None)
             verified_path = None
-            pkg_spec = pkg_entry["urls"][0] if pkg_entry else package
+            pkg_spec = _resolve_url(pkg_entry["urls"][0]) if pkg_entry else package
 
             if do_verify and pkg_entry:
                 pkg_hash = pkg_entry.get("digest", "")
@@ -1197,7 +1179,7 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
 
                     click.echo(f"Verifying {package}...", err=True)
                     try:
-                        verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
+                        verified_path = download_and_verify(_resolve_url(pkg_entry["urls"][0]), pkg_hash)
                     except HashMismatchError as exc:
                         raise click.ClickException(str(exc))
                     pkg_spec = f"file://{verified_path}"

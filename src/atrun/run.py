@@ -441,11 +441,13 @@ def generate_requirements(artifacts: list[dict], record: dict | None = None) -> 
         return eco_mod.format_resolve_output(artifacts)
 
     # Legacy fallback: Python requirements.txt format
+    from .purl import resolve_url
+
     lines = []
     for entry in artifacts:
         name = entry["name"]
-        url = entry["urls"][0]
-        hash_str = entry.get("digest", entry.get("sha256", ""))
+        url = resolve_url(entry["urls"][0])
+        hash_str = entry.get("digest", "")
         if ":" not in hash_str:
             hash_str = f"sha256:{hash_str}"
         lines.append(f"{name} @ {url} --hash={hash_str}")
@@ -507,6 +509,8 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         cmd = [selected_engine, "run", "--rm", digest_ref]
         os.execvp(cmd[0], cmd)
 
+    from .purl import resolve_url
+
     if eco_name == "python":
         if root_idx is not None and root_idx < len(artifacts):
             pkg_entry = artifacts[root_idx]
@@ -515,23 +519,8 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         if not pkg_entry:
             raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-        pkg_url = pkg_entry["urls"][0]
-        pkg_hash = pkg_entry.get("digest", "")
-
-        if do_verify and pkg_hash:
-            from .verify import HashMismatchError, download_and_verify
-
-            print(f"Verifying {package}...", file=sys.stderr)
-            try:
-                verified_path = download_and_verify(pkg_url, pkg_hash)
-            except HashMismatchError as exc:
-                raise SystemExit(str(exc))
-            pkg_url = f"file://{verified_path}"
-            print("Hash verified.", file=sys.stderr)
-        elif do_verify and not pkg_hash:
-            print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-
-        cmd = ["uvx", "--from", f"{package} @ {pkg_url}", package]
+        version = pkg_entry["version"]
+        cmd = ["uvx", "--from", f"{package}=={version}", package]
         os.execvp(cmd[0], cmd)
     elif eco_name == "node":
         if root_idx is not None and root_idx < len(artifacts):
@@ -549,16 +538,16 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
             print(f"Verifying {package}...", file=sys.stderr)
             try:
-                verified_path = download_and_verify(pkg_entry["urls"][0], pkg_hash)
+                verified_path = download_and_verify(resolve_url(pkg_entry["urls"][0]), pkg_hash)
             except HashMismatchError as exc:
                 raise SystemExit(str(exc))
             print("Hash verified.", file=sys.stderr)
             pkg_spec = f"file://{verified_path}"
         elif do_verify and not pkg_hash:
             print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-            pkg_spec = pkg_entry["urls"][0]
+            pkg_spec = resolve_url(pkg_entry["urls"][0])
         else:
-            pkg_spec = pkg_entry["urls"][0]
+            pkg_spec = resolve_url(pkg_entry["urls"][0])
 
         selected_engine = engine or "pnpm"
         if selected_engine == "bun":
@@ -580,7 +569,7 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
 
                 print(f"Verifying {package}...", file=sys.stderr)
                 try:
-                    verify_artifact(pkg_entry["urls"][0], pkg_hash)
+                    verify_artifact(resolve_url(pkg_entry["urls"][0]), pkg_hash)
                 except HashMismatchError as exc:
                     raise SystemExit(str(exc))
                 print("Hash verified.", file=sys.stderr)

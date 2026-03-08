@@ -6,184 +6,16 @@ metadata extraction, and record creation via XRPC.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
 
 from .auth import load_session, refresh_session
 from .ecosystems import PACKAGE_TYPES, detect_ecosystem_from_lockfile, detect_ecosystem_from_url, get_ecosystem
-from .verify import hash_bytes as _hash_bytes, hash_file as _hash_file
+from .verify import hash_bytes as _hash_bytes
 
 COLLECTION = "dev.atpub.manifest"
-
-
-def _resolve_npm_shorthand(spec: str) -> str:
-    """Resolve npm:package or npm:package@version to a tarball URL.
-
-    Without @version, fetches the latest version from the npm registry.
-    """
-    name = spec.removeprefix("npm:")
-    if "@" in name and not name.startswith("@"):
-        name, version = name.rsplit("@", 1)
-    elif name.startswith("@") and "@" in name.split("/", 1)[-1]:
-        # Scoped package: @scope/pkg@version
-        scope_pkg, version = name.rsplit("@", 1)
-        name = scope_pkg
-    else:
-        version = None
-
-    resp = httpx.get(f"https://registry.npmjs.org/{name}")
-    resp.raise_for_status()
-    data = resp.json()
-
-    if version is None:
-        version = data.get("dist-tags", {}).get("latest")
-        if not version:
-            raise SystemExit(f"Cannot determine latest version of {name}")
-
-    tarball = data.get("versions", {}).get(version, {}).get("dist", {}).get("tarball")
-    if not tarball:
-        raise SystemExit(f"Cannot find tarball for {name}@{version}")
-    return tarball
-
-
-def _resolve_crate_shorthand(spec: str) -> str:
-    """Resolve crate:name or crate:name@version to a crates.io download URL.
-
-    Without @version, fetches the latest version from crates.io.
-    """
-    name = spec.removeprefix("crate:")
-    if "@" in name:
-        name, version = name.rsplit("@", 1)
-    else:
-        version = None
-
-    resp = httpx.get(
-        f"https://crates.io/api/v1/crates/{name}",
-        headers={"User-Agent": "atrun"},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    if version is None:
-        version = data.get("crate", {}).get("max_version")
-        if not version:
-            raise SystemExit(f"Cannot determine latest version of crate {name}")
-
-    return f"https://crates.io/api/v1/crates/{name}/{version}/download"
-
-
-def _resolve_go_shorthand(spec: str) -> str:
-    """Resolve go:module or go:module@version to a proxy.golang.org URL.
-
-    Without @version, fetches the latest version from the Go module proxy.
-    """
-    import re
-
-    module = spec.removeprefix("go:")
-    if "@" in module:
-        module, version = module.rsplit("@", 1)
-    else:
-        version = None
-
-    # Escape uppercase letters for proxy URL
-    escaped = re.sub(r"[A-Z]", lambda m: f"!{m.group().lower()}", module)
-
-    if version is None:
-        resp = httpx.get(f"https://proxy.golang.org/{escaped}/@latest")
-        resp.raise_for_status()
-        data = resp.json()
-        version = data.get("Version")
-        if not version:
-            raise SystemExit(f"Cannot determine latest version of {module}")
-
-    return f"https://proxy.golang.org/{escaped}/@v/{version}.zip"
-
-
-def _resolve_pypi_shorthand(spec: str) -> str:
-    """Resolve pypi:name or pypi:name@version to a PyPI wheel URL.
-
-    Without @version, fetches the latest version. Prefers wheels over
-    sdists. Queries the PyPI JSON API to get the actual download URL.
-    """
-    name = spec.removeprefix("pypi:")
-    if "@" in name:
-        name, version = name.rsplit("@", 1)
-    else:
-        version = None
-
-    if version:
-        api_url = f"https://pypi.org/pypi/{name}/{version}/json"
-    else:
-        api_url = f"https://pypi.org/pypi/{name}/json"
-
-    resp = httpx.get(api_url)
-    resp.raise_for_status()
-    data = resp.json()
-
-    urls = data.get("urls", [])
-    # Prefer wheel over sdist
-    for u in urls:
-        if u["url"].endswith(".whl"):
-            return u["url"]
-    for u in urls:
-        if u["url"].endswith(".tar.gz"):
-            return u["url"]
-    if urls:
-        return urls[0]["url"]
-
-    version = version or data.get("info", {}).get("version", "?")
-    raise SystemExit(f"No downloadable files found for {name}@{version} on PyPI")
-
-
-def _resolve_docker_shorthand(spec: str) -> str:
-    """Resolve docker:image:tag to an oci:// URL.
-
-    Examples:
-      docker:ghcr.io/user/app:1.0.0 -> oci://ghcr.io/user/app:1.0.0
-      docker:nginx:1.25 -> oci://docker.io/library/nginx:1.25
-      docker:user/app -> oci://docker.io/user/app:latest
-    """
-    from .ecosystems.container import _parse_image_ref
-
-    ref = spec.removeprefix("docker:")
-    parsed = _parse_image_ref(ref)
-    name = parsed["name"]
-    tag = parsed["tag"] or "latest"
-    return f"oci://{name}:{tag}"
-
-
-def _resolve_github_shorthand(spec: str) -> str:
-    """Resolve gh:owner/repo or gh:owner/repo@tag to a release asset URL.
-
-    Without @tag, uses the latest release. With @tag, fetches that specific
-    release. Picks the first asset matching common dist extensions
-    (.whl, .tgz, .tar.gz). Errors if no suitable asset is found.
-    """
-    repo = spec.removeprefix("gh:")
-    if "@" in repo:
-        repo, tag = repo.rsplit("@", 1)
-        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
-    else:
-        api_url = f"https://api.github.com/repos/{repo}/releases/latest"
-    resp = httpx.get(api_url)
-    resp.raise_for_status()
-    data = resp.json()
-
-    dist_extensions = (".whl", ".tgz", ".tar.gz")
-    for asset in data.get("assets", []):
-        name = asset["name"]
-        if any(name.endswith(ext) for ext in dist_extensions):
-            return asset["browser_download_url"]
-
-    # Fall back to first asset if no dist extension matched
-    assets = data.get("assets", [])
-    if assets:
-        return assets[0]["browser_download_url"]
-
-    raise SystemExit(f"No assets found in latest release of {repo}")
-
 
 
 def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
@@ -232,13 +64,11 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
         return ref, "latest"
     # crates.io: /api/v1/crates/{name}/{version}/download
     if "crates.io" in url and "/download" in url:
-        import re
         m = re.search(r"/crates/([^/]+)/([^/]+)/download", url)
         if m:
             return m.group(1), m.group(2)
     # proxy.golang.org: /{module}/@v/{version}.zip
     if "proxy.golang.org" in url:
-        import re
         m = re.search(r"proxy\.golang\.org/(.+)/@v/(.+)\.zip", url)
         if m:
             # Unescape module path (!x -> X)
@@ -246,7 +76,6 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
             return module, m.group(2)
     # npm scoped packages: registry.npmjs.org/@scope/pkg/-/pkg-version.tgz
     if "registry.npmjs.org" in url and "/@" in url:
-        import re
         m = re.search(r"registry\.npmjs\.org/(@[^/]+/[^/]+)/-/", url)
         if m:
             scoped_name = m.group(1)
@@ -257,143 +86,175 @@ def _name_version_from_dist_url(url: str) -> tuple[str, str]:
     return _name_version_from_dist_filename(filename)
 
 
-def _resolve_dist(dist_file: Path | None, dist_url: str | None) -> tuple[str, str, str] | None:
-    """Resolve a distribution artifact to (name, version, sha256_hex).
-
-    Handles three cases:
-      - Both file and URL: hashes the local file and verifies it matches
-        the remote download. Errors on mismatch. Silently uses the local
-        hash if the remote is not yet available (e.g. GitHub release not
-        uploaded).
-      - URL only: downloads the artifact and hashes it. Ensures the URL
-        is live before publishing.
-      - Neither: returns None.
-    """
-    if dist_file and dist_url:
-        name, version = _name_version_from_dist_filename(dist_file.name)
-        local_sha256 = _hash_file(dist_file)
-        try:
-            resp = httpx.get(dist_url, follow_redirects=True)
-            resp.raise_for_status()
-            remote_sha256 = _hash_bytes(resp.content)
-            if local_sha256 != remote_sha256:
-                raise SystemExit(
-                    f"Hash mismatch: local {dist_file.name} ({local_sha256[:12]}...) "
-                    f"does not match remote ({remote_sha256[:12]}...)"
-                )
-        except httpx.HTTPError:
-            pass  # Remote not available yet — use local hash
-        return name, version, local_sha256
-    if dist_url and not dist_file:
-        if dist_url.startswith("oci://"):
-            from .ecosystems.container import _resolve_digest
-            name, version = _name_version_from_dist_url(dist_url)
-            ref = dist_url.removeprefix("oci://")
-            digest = _resolve_digest(ref)
-            # digest is already sha256:hex format; strip prefix for consistency
-            sha256 = digest.removeprefix("sha256:")
-            return name, version, sha256
-        name, version = _name_version_from_dist_url(dist_url)
-        resp = httpx.get(dist_url, follow_redirects=True)
-        resp.raise_for_status()
-        sha256 = _hash_bytes(resp.content)
-        return name, version, sha256
-    return None
-
-
 def build_record(
     lockfile: str | None = None,
-    dist_file: Path | None = None,
-    dist_url: str | None = None,
+    dist_urls: tuple[str, ...] = (),
     ecosystem: str | None = None,
     strip_deps: bool = False,
     derived_from: tuple[str, ...] | None = None,
+    description: str | None = None,
+    license: str | None = None,
+    url: str | None = None,
 ) -> dict:
     """Build a dev.atpub.manifest record without publishing it.
 
     Args:
         lockfile: Lockfile content as a string. If None, auto-exports
             using the ecosystem's default tool (e.g. uv export for Python).
-            Skipped entirely when strip_deps is True and a dist artifact
-            is provided.
-        dist_file: Path to a local distribution file to hash and include.
-        dist_url: Public URL for the distribution. Becomes the download
-            URL in the record.
+            Skipped entirely when strip_deps is True and a dist URL is provided.
+        dist_urls: Public URLs, package URLs (pkg:pypi/name@ver), or shorthands
+            for the distribution. All resolved URLs go into the artifact's urls array.
         ecosystem: Target ecosystem ('python', 'node', 'rust'). Auto-detected
             from lockfile content or dist URL if None.
         strip_deps: If True, remove dependency arrays from resolved entries
             and skip lockfile parsing when a dist artifact is provided.
         derived_from: URIs of records this derives from. Accepts AT URIs,
             XRPC HTTPS URLs, or bsky.app post URLs. Each resolved to a strongRef.
+        description: Package description (overrides extracted metadata).
+        license: SPDX license identifier (overrides extracted metadata).
+        url: Package homepage URL (overrides extracted metadata).
 
     Returns:
         A dict representing the complete AT Protocol record, ready for
         publishing or JSON serialization.
     """
-    # Resolve dist URL shorthands
-    if dist_url and dist_url.startswith("gh:"):
-        dist_url = _resolve_github_shorthand(dist_url)
-    elif dist_url and dist_url.startswith("npm:"):
-        dist_url = _resolve_npm_shorthand(dist_url)
-    elif dist_url and dist_url.startswith("crate:"):
-        dist_url = _resolve_crate_shorthand(dist_url)
-    elif dist_url and dist_url.startswith("go:"):
-        dist_url = _resolve_go_shorthand(dist_url)
-    elif dist_url and dist_url.startswith("docker:"):
-        dist_url = _resolve_docker_shorthand(dist_url)
-    elif dist_url and dist_url.startswith("pypi:"):
-        dist_url = _resolve_pypi_shorthand(dist_url)
+    from . import purl as _purl
+
+    # Resolve each dist_url: identify purls, resolve download URLs internally.
+    # artifact_urls: what goes into the record (purls kept as-is)
+    # download_urls: resolved HTTP URLs for hashing/downloading
+    artifact_urls: list[str] = []
+    download_urls: list[str] = []
+    purl_strs: list[str] = []
+    for du in dist_urls:
+        purl_str: str | None = None
+        if du.startswith("pkg:"):
+            purl_str = du
+        else:
+            try:
+                purl_str = _purl.from_shorthand(du)
+            except ValueError:
+                pass  # raw URL
+        if purl_str is not None:
+            purl_strs.append(purl_str)
+            resolved = _purl.resolve(purl_str)
+            if resolved is None:
+                raise SystemExit(f"Cannot resolve distribution URL for {purl_str}")
+            artifact_urls.append(purl_str)
+            download_urls.append(resolved)
+        else:
+            artifact_urls.append(du)
+            download_urls.append(du)
+
+    first_purl = purl_strs[0] if purl_strs else None
+    first_download_url = download_urls[0] if download_urls else None
+
+    # Get name/version: from first purl (authoritative), fallback to URL parsing
+    package_name: str | None = None
+    package_version: str | None = None
+    if first_purl:
+        p = _purl.parse(first_purl)
+        if p.type == "npm" and p.namespace:
+            package_name = f"{p.namespace}/{p.name}"
+        elif p.type == "golang" and p.namespace:
+            package_name = f"{p.namespace}/{p.name}"
+        else:
+            package_name = p.name
+        package_version = p.version
+    elif first_download_url:
+        package_name, package_version = _name_version_from_dist_url(first_download_url)
 
     # Determine ecosystem
+    if ecosystem is None and first_purl is not None:
+        ecosystem = _purl.detect_ecosystem(first_purl)
     if ecosystem is None and lockfile is not None:
         ecosystem = detect_ecosystem_from_lockfile(lockfile)
-    elif ecosystem is None and dist_url:
-        ecosystem = detect_ecosystem_from_url(dist_url) or "python"
-    elif ecosystem is None:
+    if ecosystem is None and first_download_url:
+        ecosystem = detect_ecosystem_from_url(first_download_url) or "python"
+    if ecosystem is None:
         ecosystem = "python"
 
     eco_mod = get_ecosystem(ecosystem)
 
-    # Parse lockfile if available; skip if strip_deps and we have a dist artifact
-    entries = []
-    dist_info = _resolve_dist(dist_file, dist_url)
+    # Resolve digest: try API-based extraction first, download as fallback
+    digest: str | None = None
+    for ps in purl_strs:
+        digest = _purl.resolve_digest(ps)
+        if digest:
+            break
+    if digest is None and first_download_url:
+        if first_download_url.startswith("oci://"):
+            from .ecosystems.container import _resolve_digest
+            ref = first_download_url.removeprefix("oci://")
+            oci_digest = _resolve_digest(ref)
+            digest = oci_digest  # already algo:hex format
+        else:
+            resp = httpx.get(first_download_url, follow_redirects=True)
+            resp.raise_for_status()
+            sha256 = _hash_bytes(resp.content)
+            digest = f"sha256:{sha256}"
 
-    if strip_deps and dist_info and lockfile is None:
-        # No lockfile needed — just the dist artifact
-        pass
+    has_dist = bool(artifact_urls) and digest is not None
+
+    # Parse lockfile if available; skip if strip_deps and we have a dist artifact
+    entries: list[dict] = []
+    if strip_deps and has_dist and lockfile is None:
+        pass  # No lockfile needed
     else:
         lockfile_str = lockfile if lockfile is not None else eco_mod.export_lockfile()
         entries = eco_mod.parse_lockfile(lockfile_str)
-        if not entries and not dist_info:
+        if not entries and not has_dist:
             raise SystemExit("No resolved packages found.")
 
-    package_name = None
-    if dist_info:
-        name, version, sha256 = dist_info
-        package_name = name
-        existing = next((e for e in entries if e["name"] == name and e["version"] == version), None)
+    if has_dist and package_name and package_version:
+        existing = next(
+            (e for e in entries if e["name"] == package_name and e["version"] == package_version),
+            None,
+        )
         if existing is None:
             entries.append({
-                "name": name,
-                "version": version,
-                "digest": f"sha256:{sha256}",
-                "urls": [dist_url],
+                "name": package_name,
+                "version": package_version,
+                "digest": digest,
+                "urls": artifact_urls,
             })
             entries.sort(key=lambda e: e["name"])
+        else:
+            # Update existing entry with resolved URLs
+            existing["urls"] = artifact_urls
+            if digest:
+                existing["digest"] = digest
 
     if strip_deps:
         entries = [{k: v for k, v in e.items() if k != "dependencies"} for e in entries]
 
-    # Extract metadata from the dist artifact (prefer local file)
+    # Extract metadata: purl-based first (no download), then ecosystem fallback
     dist_meta: dict[str, str] = {}
-    if dist_info:
+    for ps in purl_strs:
         try:
-            if dist_file and hasattr(eco_mod, "extract_local_dist_metadata"):
-                dist_meta = eco_mod.extract_local_dist_metadata(dist_file)
-            elif dist_url:
-                dist_meta = eco_mod.extract_dist_metadata(dist_url)
+            purl_meta = _purl.get_unified_metadata(ps)
+            for field in ("description", "license", "url"):
+                if field not in dist_meta and field in purl_meta:
+                    dist_meta[field] = purl_meta[field]
         except Exception:
-            pass  # metadata extraction is best-effort
+            pass
+    # Ecosystem metadata fallback for missing fields
+    if first_download_url and any(f not in dist_meta for f in ("description", "license", "url")):
+        try:
+            eco_meta = eco_mod.extract_dist_metadata(first_download_url)
+            for field in ("description", "license", "url"):
+                if field not in dist_meta and field in eco_meta:
+                    dist_meta[field] = eco_meta[field]
+        except Exception:
+            pass
+
+    # CLI flags override everything
+    if description is not None:
+        dist_meta["description"] = description
+    if license is not None:
+        dist_meta["license"] = license
+    if url is not None:
+        dist_meta["url"] = url
 
     record: dict = {
         "$type": COLLECTION,
@@ -409,6 +270,9 @@ def build_record(
     for field in ("description", "license", "url"):
         if field in dist_meta:
             record[field] = dist_meta[field]
+
+    if first_purl:
+        record["purl"] = first_purl
 
     # packageType from ecosystem
     package_type = PACKAGE_TYPES.get(ecosystem)
@@ -445,8 +309,7 @@ def build_record(
 
 def publish(
     lockfile: str | None = None,
-    dist_file: Path | None = None,
-    dist_url: str | None = None,
+    dist_urls: tuple[str, ...] = (),
     ecosystem: str | None = None,
     strip_deps: bool = False,
     derived_from: tuple[str, ...] | None = None,
@@ -454,7 +317,10 @@ def publish(
     post: bool = False,
     handle: str | None = None,
     force: bool = False,
-) -> str:
+    description: str | None = None,
+    license: str | None = None,
+    url: str | None = None,
+) -> tuple[str, str | None]:
     """Build and publish a record to AT Protocol.
 
     Builds the record via build_record(), then creates it on the
@@ -464,10 +330,10 @@ def publish(
     embedding the record's XRPC URL, using the record's metadata
     (package name, version, description) for the card content.
 
-    Returns the AT URI of the created record
-    (e.g. at://did:plc:abc123/dev.atpub.manifest/3mgxyz).
+    Returns (record_uri, post_uri) where post_uri is None if --post
+    was not used.
     """
-    record = build_record(lockfile, dist_file, dist_url, ecosystem=ecosystem, strip_deps=strip_deps, derived_from=derived_from)
+    record = build_record(lockfile, dist_urls=dist_urls, ecosystem=ecosystem, strip_deps=strip_deps, derived_from=derived_from, description=description, license=license, url=url)
 
     session = load_session(handle=handle)
     did = session["did"]

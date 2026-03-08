@@ -48,7 +48,7 @@ Multiple competing AppViews could coexist — one focused on security auditing, 
 Future capabilities include:
 
 - **Dependency back-references** — each artifact's `ref` field can point to its own `dev.atpub.manifest` record on AT Protocol, creating a web of linked manifests across publishers. An AppView could traverse these references to build a full dependency graph where every node is a signed, verifiable record.
-- **Repository self-verification** — formalizing the `[tool.atpub]` handle embedded in a project's repository (e.g. in `pyproject.toml` or `package.json`). A tool or AppView could verify that the handle publishing a manifest matches the handle declared in the source repository, providing another layer of authenticity beyond the AT Protocol signature.
+- **Repository self-verification** — the `[tool.atpub]` handle embedded in a project's config (pyproject.toml, package.json, Cargo.toml) is now used for session resolution, and a tool or AppView could verify that the handle publishing a manifest matches the handle declared in the source repository, providing another layer of authenticity beyond the AT Protocol signature.
 
 ## Install
 
@@ -92,6 +92,77 @@ To publish packages, create an [app password](https://bsky.app/settings/app-pass
 
 ```
 atrun login --handle alice.bsky.social
+```
+
+Sessions are stored per-handle under `~/.config/atrun/sessions/`, so you can be logged in to multiple accounts simultaneously. The last login is also saved as the default.
+
+#### Per-project handles
+
+Add a handle to your project config and atrun will use it automatically — no `--handle` flag needed:
+
+**pyproject.toml:**
+```toml
+[tool.atpub]
+handle = "myproject-releases.bsky.social"
+```
+
+**package.json:**
+```json
+{
+  "atpub": { "handle": "myproject-releases.bsky.social" }
+}
+```
+
+**Cargo.toml:**
+```toml
+[package.metadata.atpub]
+handle = "myproject-releases.bsky.social"
+```
+
+atrun walks up from the current directory looking for these config files (stopping at `.git` boundaries), so it works from any subdirectory of your project.
+
+#### Session resolution order
+
+When publishing, yanking, or unyanking, atrun resolves credentials in this order:
+
+1. `ATRUN_SESSION` env var (pre-built session JSON)
+2. `ATRUN_HANDLE` + `ATRUN_APP_PASSWORD` env vars (fresh login)
+3. `--handle` CLI flag
+4. Project config discovery (pyproject.toml, package.json, Cargo.toml)
+5. Default session (`~/.config/atrun/session.json`)
+
+#### GitHub Actions
+
+Set `ATRUN_HANDLE` and `ATRUN_APP_PASSWORD` as repository secrets. atrun performs a fresh login on each run — no need to store session tokens.
+
+```yaml
+- name: Publish to AT Protocol
+  env:
+    ATRUN_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
+    ATRUN_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+  run: atrun publish --dist-url npm:mypackage@${{ github.ref_name }}
+```
+
+A full release workflow might look like:
+
+```yaml
+name: Release
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv tool install atrun
+      - name: Publish to AT Protocol
+        env:
+          ATRUN_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
+          ATRUN_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+        run: atrun publish --dist-url gh:${{ github.repository }}@${{ github.event.release.tag_name }} --post
 ```
 
 ### Publish a package
@@ -355,6 +426,8 @@ To restore a yanked version:
 atrun unyank @alice.bsky.social:cowsay@1.6.0
 ```
 
+Both `yank` and `unyank` support `--handle` to specify which account to authenticate as, and respect the same session resolution chain as `publish`.
+
 ## Addressing
 
 atrun accepts multiple address formats everywhere a record is referenced:
@@ -394,7 +467,7 @@ Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json)
 | `license` | License identifier |
 | `url` | Project URL |
 | `packageType` | Open enum: `dev.atpub.defs#pythonPackage`, `#npmPackage`, `#rustCrate`, `#goModule`, `#dataset`, `#document`, `#container` |
-| `tool` | The tool that created this manifest (e.g. `atrun@0.14.3`) |
+| `tool` | The tool that created this manifest (e.g. `atrun@0.15.0`) |
 | `metadata` | Free-form object for ecosystem-specific data (e.g. `pythonVersion`, `engine`) |
 | `artifacts` | Array of artifact entries (see below) |
 | `derivedFrom` | StrongRef(s) to records this derives from (uri + CID) |

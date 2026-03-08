@@ -455,6 +455,47 @@ The `@handle:package` shorthand is the most human-friendly. It resolves to the l
 
 Ecosystem is auto-detected from the lockfile content or distribution URL. You can override with `--ecosystem python|node|rust|go|container`.
 
+### How verification and installation work
+
+Each ecosystem follows the same general pattern — download the artifact, verify its hash against the digest in the manifest record, then install using the ecosystem's native tool — but the details vary.
+
+#### Python
+
+- **Verification:** The wheel is downloaded and its SHA256 (or SHA512) hash is computed and compared against the `digest` field in the manifest. If the hashes match, the verified artifact is used for installation via a `file://` URL. If no hash is available, atrun warns and installs directly from the remote URL.
+- **Installation:** `uv tool install {package} @ {url}`. Dependencies are resolved by uv natively — the lockfile in the record captures the dependency snapshot at publish time, but uv handles resolution at install time.
+- **Running:** `uvx --from {package} @ {url}` — installs into a temporary environment and executes.
+
+#### Node.js
+
+Node.js has the most thorough verification, with a two-stage process when dependency data is present:
+
+- **Verification (with `--deps`):**
+  1. atrun reconstructs a `pnpm-lock.yaml` from the artifact entries in the record, including integrity hashes (SHA512, SRI format) for every dependency.
+  2. `pnpm install --frozen-lockfile` verifies all dependency hashes against the reconstructed lockfile.
+  3. The main package is downloaded separately, its hash is verified against the manifest digest, and it is installed from the verified local file.
+- **Verification (without `--deps`):** The main package tarball is downloaded, hash-verified, and installed directly via `{engine} install -g {url}`.
+- **Installation:** Global install via the selected engine — `pnpm install -g` (default), `npm install -g`, or `bun install -g`. Choose with `--engine`.
+- **Running:** `pnpm exec`, `npx`, or `bunx` depending on the engine.
+
+#### Rust
+
+- **Verification:** The crate is downloaded from crates.io into memory and its SHA256 hash is compared against the manifest digest. This is a pre-check — the artifact is not saved to disk.
+- **Installation:** `cargo install {package}@{version}`. Cargo handles dependency resolution natively using its own lock mechanisms. The lockfile in the record captures the dependency snapshot but cargo resolves independently.
+- **Running:** `cargo install --locked {package}@{version}` — the `--locked` flag tells cargo to use exact dependency versions.
+
+#### Go
+
+- **Verification:** Go module hashes in `go.sum` use the `h1:` format (base64-encoded SHA256 of the module zip). atrun converts these to standard `sha256:{hex}` format for the manifest. Verification is handled implicitly by Go's native tooling — `go install` checks modules against `go.sum` automatically.
+- **Installation:** `go install {module}@{version}`. Go handles dependency resolution natively.
+- **Running:** `go run {module}@{version}`.
+
+#### Container
+
+- **Verification:** Unlike other ecosystems, container verification queries the registry in real time. atrun calls `docker manifest inspect` (or `crane digest`) to get the current manifest digest and compares it against the SHA256 digest stored in the record. This catches cases where a tag has been re-pointed to a different image.
+- **Installation:** `docker pull {image}@sha256:{digest}` — pulling by digest (not tag) ensures you get exactly the image that was published, regardless of tag mutations. With crane: `crane pull {image}@sha256:{digest}`.
+- **Running:** `docker run --rm {image}@sha256:{digest}` — runs with the digest-pinned reference.
+- **Image reference normalization:** Bare names like `nginx` are expanded to `docker.io/library/nginx:latest`. User names like `user/app` become `docker.io/user/app:latest`.
+
 ## Record format
 
 Records use the `dev.atpub.manifest` [lexicon](lexicons/dev.atpub.manifest.json). A record contains:

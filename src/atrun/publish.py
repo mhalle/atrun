@@ -18,6 +18,32 @@ from .verify import hash_bytes as _hash_bytes
 COLLECTION = "dev.atpub.manifest"
 
 
+def _list_all_records_client(session: dict, repo: str, collection: str, **extra_params: object) -> list[dict]:
+    """Page through all listRecords results via an authenticated XRPC call.
+
+    Returns the full list of record dicts (each with uri, cid, value keys).
+    """
+    records: list[dict] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, object] = {"repo": repo, "collection": collection, "limit": 100, **extra_params}
+        if cursor:
+            params["cursor"] = cursor
+        resp = httpx.get(
+            "https://bsky.social/xrpc/com.atproto.repo.listRecords",
+            headers={"Authorization": f"Bearer {session['accessJwt']}"},
+            params=params,
+        )
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        records.extend(data.get("records", []))
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+    return records
+
+
 def _name_version_from_dist_filename(filename: str) -> tuple[str, str]:
     """Extract (package_name, version) from a distribution filename.
 
@@ -379,14 +405,8 @@ def _find_duplicate_record(session: dict, did: str, package: str, version: str, 
 
     Returns the AT URI of the existing record if found, None otherwise.
     """
-    resp = httpx.get(
-        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
-        headers={"Authorization": f"Bearer {session['accessJwt']}"},
-        params={"repo": did, "collection": COLLECTION, "limit": 100, "reverse": False},
-    )
-    if resp.status_code != 200:
-        return None
-    for rec in resp.json().get("records", []):
+    all_records = _list_all_records_client(session, did, COLLECTION, reverse=False)
+    for rec in all_records:
         value = rec.get("value", {})
         if value.get("package") != package:
             continue
@@ -405,14 +425,8 @@ def _find_previous_record(session: dict, did: str, package: str, package_type: s
     returns the first one matching the package name and packageType as a
     strongRef {uri, cid}, or None if no previous record exists.
     """
-    resp = httpx.get(
-        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
-        headers={"Authorization": f"Bearer {session['accessJwt']}"},
-        params={"repo": did, "collection": COLLECTION, "limit": 100, "reverse": False},
-    )
-    if resp.status_code != 200:
-        return None
-    for rec in resp.json().get("records", []):
+    all_records = _list_all_records_client(session, did, COLLECTION, reverse=False)
+    for rec in all_records:
         value = rec.get("value", {})
         if value.get("package") != package:
             continue

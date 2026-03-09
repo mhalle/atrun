@@ -314,17 +314,11 @@ def unyank(target: str, unyank_handle: str | None):
     target_uri = at_info["uri"]
 
     # Find the yank record for this module record
-    import httpx
-    resp = httpx.get(
-        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
-        headers={"Authorization": f"Bearer {session['accessJwt']}"},
-        params={"repo": did, "collection": "dev.atpub.yank", "limit": 100},
-    )
-    if resp.status_code != 200:
-        raise click.ClickException("Failed to list yank records.")
+    from .publish import _list_all_records_client
+    all_yank_records = _list_all_records_client(session, did, "dev.atpub.yank")
 
     yank_uri = None
-    for rec in resp.json().get("records", []):
+    for rec in all_yank_records:
         subject = rec.get("value", {}).get("subject", {})
         if subject.get("uri") == target_uri:
             yank_uri = rec["uri"]
@@ -427,13 +421,10 @@ def remove(target: str, remove_handle: str | None, yes: bool):
 
     # Delete any yank records that reference this record
     import httpx
-    resp = httpx.get(
-        "https://bsky.social/xrpc/com.atproto.repo.listRecords",
-        headers={"Authorization": f"Bearer {session['accessJwt']}"},
-        params={"repo": did, "collection": "dev.atpub.yank", "limit": 100},
-    )
-    if resp.status_code == 200:
-        for rec in resp.json().get("records", []):
+    from .publish import _list_all_records_client
+    all_yank_records = _list_all_records_client(session, did, "dev.atpub.yank")
+    if all_yank_records:
+        for rec in all_yank_records:
             subject = rec.get("value", {}).get("subject", {})
             if subject.get("uri") == target_uri:
                 m = AT_URI_RE.match(rec["uri"])

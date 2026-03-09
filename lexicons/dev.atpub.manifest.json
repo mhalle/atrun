@@ -23,10 +23,11 @@
           },
           "description": {
             "type": "string",
-            "maxLength": 1024
+            "maxLength": 10240
           },
           "license": {
             "type": "string",
+            "description": "SPDX license identifier or expression (e.g. 'MIT', 'Apache-2.0', 'CC-BY-4.0').",
             "maxLength": 128
           },
           "url": {
@@ -97,7 +98,7 @@
         "urls": {
           "type": "array",
           "items": { "type": "string", "format": "uri" },
-          "maxLength": 16,
+          "maxLength": 32,
           "description": "Download URLs, evaluated first to last."
         },
         "artifactType": {

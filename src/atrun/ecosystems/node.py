@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import tarfile
+from pathlib import Path
 
 import httpx
 

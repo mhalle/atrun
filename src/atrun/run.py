@@ -18,6 +18,27 @@ SHORTHAND_RE = re.compile(r"^@([^:]+):([^@]+)(?:@(.+))?$")
 YANK_COLLECTION = "dev.atpub.yank"
 
 
+def _list_all_records_xrpc(pds_url: str, repo: str, collection: str, **extra_params: object) -> list[dict]:
+    """Page through all listRecords results via the public XRPC endpoint.
+
+    Returns the full list of record dicts (each with uri, cid, value keys).
+    """
+    records: list[dict] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, object] = {"repo": repo, "collection": collection, "limit": 100, **extra_params}
+        if cursor:
+            params["cursor"] = cursor
+        resp = httpx.get(f"{pds_url}/xrpc/com.atproto.repo.listRecords", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        records.extend(data.get("records", []))
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+    return records
+
+
 def resolve_pds_url(handle_or_did: str) -> tuple[str, str]:
     """Resolve a handle or DID to a (PDS base URL, DID) tuple.
 
@@ -135,14 +156,10 @@ def list_records(handle: str, package: str | None = None) -> list[dict]:
     """
     pds_url, did = resolve_pds_url(handle)
 
-    resp = httpx.get(
-        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
-        params={"repo": did, "collection": "dev.atpub.manifest", "limit": 100, "reverse": False},
-    )
-    resp.raise_for_status()
+    all_records = _list_all_records_xrpc(pds_url, did, "dev.atpub.manifest", reverse=False)
 
     results = []
-    for rec in resp.json().get("records", []):
+    for rec in all_records:
         value = rec.get("value", {})
         pkg = value.get("package", "")
         if package and pkg != package:
@@ -178,15 +195,13 @@ def fetch_yanks(handle_or_did: str) -> dict[str, str]:
     """
     pds_url, did = resolve_pds_url(handle_or_did)
 
-    resp = httpx.get(
-        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
-        params={"repo": did, "collection": YANK_COLLECTION, "limit": 100},
-    )
-    if resp.status_code != 200:
+    try:
+        all_records = _list_all_records_xrpc(pds_url, did, YANK_COLLECTION)
+    except httpx.HTTPStatusError:
         return {}
 
     yanks: dict[str, str] = {}
-    for rec in resp.json().get("records", []):
+    for rec in all_records:
         value = rec.get("value", {})
         subject = value.get("subject", {})
         uri = subject.get("uri", "")
@@ -205,17 +220,13 @@ def _resolve_shorthand(handle: str, package: str, version: str | None) -> dict:
     """
     pds_url, did = resolve_pds_url(handle)
 
-    resp = httpx.get(
-        f"{pds_url}/xrpc/com.atproto.repo.listRecords",
-        params={"repo": did, "collection": "dev.atpub.manifest", "limit": 100, "reverse": False},
-    )
-    resp.raise_for_status()
+    all_records = _list_all_records_xrpc(pds_url, did, "dev.atpub.manifest", reverse=False)
 
     # For latest resolution, skip yanked versions
     is_latest = not version or version == "latest"
     yanks = fetch_yanks(handle) if is_latest else {}
 
-    for rec in resp.json().get("records", []):
+    for rec in all_records:
         value = rec.get("value", {})
         if value.get("package") != package:
             continue
@@ -455,13 +466,14 @@ def generate_requirements(artifacts: list[dict], record: dict | None = None) -> 
 
 
 def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_verify: bool = True) -> None:
-    """Fetch a record and run the package in a temporary environment.
+    """Fetch a record and run the package via the ecosystem's native runner.
 
-    For Python, downloads and verifies the main artifact hash, then
-    runs via uvx with the verified local file.
+    Python delegates to uvx, Node to pnpx/bunx/npx, Rust to cargo install,
+    Go to go install. Container optionally verifies the image digest before
+    running via docker/podman (controlled by do_verify).
 
-    For Node, delegates to the ecosystem's native run command.
-    The engine parameter selects the Node.js package manager (pnpm, bun, npm).
+    The engine parameter selects the container runtime or Node.js package
+    manager.
     """
     import sys
 
@@ -509,8 +521,6 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         cmd = [selected_engine, "run", "--rm", digest_ref]
         os.execvp(cmd[0], cmd)
 
-    from .purl import resolve_url
-
     if eco_name == "python":
         if root_idx is not None and root_idx < len(artifacts):
             pkg_entry = artifacts[root_idx]
@@ -542,24 +552,6 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
             cmd = ["pnpx", pkg_spec]
         os.execvp(cmd[0], cmd)
     elif eco_name == "rust":
-        if root_idx is not None and root_idx < len(artifacts):
-            pkg_entry = artifacts[root_idx]
-        else:
-            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
-        if do_verify and pkg_entry:
-            pkg_hash = pkg_entry.get("digest", "")
-            if pkg_hash:
-                from .verify import HashMismatchError, verify_artifact
-
-                print(f"Verifying {package}...", file=sys.stderr)
-                try:
-                    verify_artifact(resolve_url(pkg_entry["urls"][0]), pkg_hash)
-                except HashMismatchError as exc:
-                    raise SystemExit(str(exc))
-                print("Hash verified.", file=sys.stderr)
-            else:
-                print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-
         cmd = eco_mod.generate_run_args(record)
         os.execvp(cmd[0], cmd)
     else:

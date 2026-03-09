@@ -6,10 +6,7 @@ import base64
 import hashlib
 import io
 import json
-import subprocess
 import tarfile
-import tempfile
-from pathlib import Path
 
 import httpx
 
@@ -188,45 +185,11 @@ def generate_requirements(artifacts: list[dict]) -> str:
     return "\n".join(lines)
 
 
-SUPPORTED_ENGINES = ("pnpm", "bun", "npm")
 DEFAULT_ENGINE = "pnpm"
-
-
-def _check_pnpm_global_bin():
-    """Check that pnpm global bin directory is configured and in PATH."""
-    import os
-    result = subprocess.run(
-        ["pnpm", "config", "get", "global-bin-dir"],
-        capture_output=True, text=True,
-    )
-    bin_dir = result.stdout.strip() if result.returncode == 0 else ""
-    if not bin_dir or bin_dir == "undefined":
-        raise SystemExit(
-            "pnpm global bin directory is not configured.\n"
-            "Run 'pnpm setup' then restart your shell, or set it manually:\n"
-            "  pnpm config set global-bin-dir ~/Library/pnpm\n"
-            "  export PNPM_HOME=~/Library/pnpm\n"
-            "  export PATH=\"$PNPM_HOME:$PATH\""
-        )
-    if bin_dir not in os.environ.get("PATH", ""):
-        raise SystemExit(
-            f"pnpm global bin directory ({bin_dir}) is not in PATH.\n"
-            "Add to your shell profile:\n"
-            f"  export PATH=\"{bin_dir}:$PATH\""
-        )
-
-
-def _check_engine(engine: str):
-    """Validate engine and check prerequisites."""
-    if engine not in SUPPORTED_ENGINES:
-        raise SystemExit(f"Unknown engine: {engine}. Supported: {', '.join(SUPPORTED_ENGINES)}")
-    if engine == "pnpm":
-        _check_pnpm_global_bin()
 
 
 def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
     """Build global install command args for the chosen engine."""
-    _check_engine(engine)
     package = record.get("package")
     artifacts = record.get("artifacts", [])
 
@@ -234,9 +197,8 @@ def generate_install_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[st
     if not pkg_entry:
         raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-    from ..purl import resolve_url
-
-    return [engine, "install", "-g", resolve_url(pkg_entry["urls"][0])]
+    version = pkg_entry["version"]
+    return [engine, "install", "-g", f"{package}@{version}"]
 
 
 def generate_run_args(record: dict, engine: str = DEFAULT_ENGINE) -> list[str]:
@@ -285,165 +247,6 @@ def fetch_metadata(url: str) -> dict:
 
     return result
 
-
-def _build_pnpm_lockfile(record: dict) -> str:
-    """Reconstruct a pnpm-lock.yaml from the record's artifacts entries."""
-    import yaml
-
-    package = record["package"]
-    artifacts = record["artifacts"]
-
-    pkg_entry = next(e for e in artifacts if e["name"] == package)
-    version = pkg_entry["version"]
-
-    # Build packages section (integrity) and snapshots section (deps)
-    packages = {}
-    snapshots = {}
-
-    for entry in artifacts:
-        key = f"{entry['name']}@{entry['version']}"
-        sri = _hex_to_sri(entry["digest"])
-
-        pkg_info: dict = {"resolution": {"integrity": sri}}
-        if entry["name"] == package:
-            pkg_info["hasBin"] = True
-        packages[key] = pkg_info
-
-        # Snapshots: dependency relationships
-        dep_indices = entry.get("dependencies", [])
-        if dep_indices:
-            snap_deps = {}
-            for idx in dep_indices:
-                dep_entry = artifacts[idx]
-                snap_deps[dep_entry["name"]] = dep_entry["version"]
-            snapshots[key] = {"dependencies": snap_deps}
-        else:
-            snapshots[key] = {}
-
-    lock = {
-        "lockfileVersion": "9.0",
-        "settings": {
-            "autoInstallPeers": True,
-            "excludeLinksFromLockfile": False,
-        },
-        "importers": {
-            ".": {
-                "dependencies": {
-                    package: {
-                        "specifier": version,
-                        "version": version,
-                    },
-                },
-            },
-        },
-        "packages": packages,
-        "snapshots": snapshots,
-    }
-
-    return yaml.dump(lock, default_flow_style=False, sort_keys=False)
-
-
-def run_verified_install(record: dict, extra_args: tuple[str, ...] = (), dry_run: bool = False, engine: str = DEFAULT_ENGINE, do_verify: bool = True) -> list[str] | None:
-    """Install with a reconstructed lockfile and frozen lockfile verification.
-
-    For pnpm: reconstructs pnpm-lock.yaml, verifies with --frozen-lockfile.
-    For bun/npm: uses --frozen-lockfile for verification.
-    Then installs globally using the chosen engine.
-    """
-    import click
-
-    package = record.get("package")
-    artifacts = record.get("artifacts", [])
-
-    pkg_entry = next((e for e in artifacts if e["name"] == package), None)
-    if not pkg_entry:
-        raise SystemExit(f"Package '{package}' not found in artifacts list.")
-    version = pkg_entry["version"]
-
-    from ..purl import resolve_url
-
-    # Check if record has dependency info for frozen lockfile install
-    has_deps = any(e.get("dependencies") for e in artifacts)
-
-    pkg_download_url = resolve_url(pkg_entry["urls"][0])
-
-    if not has_deps:
-        # Fallback: direct install without lockfile verification
-        cmd = [engine, "install", "-g", pkg_download_url, *extra_args]
-        if dry_run:
-            return cmd
-        _check_engine(engine)
-        click.echo("No dependency graph in record — installing without lockfile verification")
-        subprocess.run(cmd, check=True)
-        return None
-
-    if dry_run:
-        import shlex
-        pkg_hash = pkg_entry.get("digest", "")
-        click.echo(shlex.join(["pnpm", "install", "--frozen-lockfile"]))
-        if do_verify and pkg_hash:
-            click.echo(f"# download and verify hash: {pkg_hash}")
-        click.echo(shlex.join([engine, "install", "-g", pkg_download_url, *extra_args]))
-        return None
-
-    # Verified install currently requires pnpm (reconstructs pnpm-lock.yaml)
-    if engine != "pnpm":
-        click.echo(f"Verified install with --deps requires pnpm (using pnpm for verification, {engine} for global install)")
-
-    with tempfile.TemporaryDirectory(prefix="atrun-node-") as tmpdir:
-        tmpdir_path = Path(tmpdir)
-
-        # Write package.json
-        pkg_json = {
-            "name": "atrun-install",
-            "version": "0.0.0",
-            "dependencies": {package: version},
-        }
-        (tmpdir_path / "package.json").write_text(json.dumps(pkg_json))
-
-        # Write reconstructed pnpm-lock.yaml
-        lockfile_content = _build_pnpm_lockfile(record)
-        (tmpdir_path / "pnpm-lock.yaml").write_text(lockfile_content)
-
-        # Install with frozen lockfile — pnpm verifies all integrity hashes
-        click.echo(f"Installing with integrity verification ({len(artifacts)} packages)...")
-        subprocess.run(
-            ["pnpm", "install", "--frozen-lockfile"],
-            cwd=tmpdir_path,
-            check=True,
-        )
-        click.echo(f"Verified and installed {len(artifacts)} packages")
-
-        # Verify the main package artifact from its manifest URL before global install.
-        # The frozen-lockfile step verifies registry integrity, but pkg_entry["url"]
-        # may point outside the registry (GitHub tarball, mirror, etc.).
-        pkg_hash = pkg_entry.get("digest", "")
-        install_spec = pkg_download_url
-        verified_path = None
-
-        if do_verify and pkg_hash:
-            from ..verify import HashMismatchError, download_and_verify
-
-            click.echo(f"Verifying {package} artifact from manifest URL...")
-            try:
-                verified_path = download_and_verify(pkg_download_url, pkg_hash)
-            except HashMismatchError as exc:
-                raise SystemExit(str(exc))
-            install_spec = f"file://{verified_path}"
-            click.echo("Artifact hash verified.")
-        elif do_verify and not pkg_hash:
-            click.echo(f"Warning: no hash in record for {package}, skipping verification.")
-
-        _check_engine(engine)
-        try:
-            subprocess.run(
-                [engine, "install", "-g", install_spec, *extra_args],
-                check=True,
-            )
-        finally:
-            if verified_path:
-                verified_path.unlink(missing_ok=True)
-    return None
 
 
 def extract_dist_metadata(url: str) -> dict:

@@ -530,24 +530,8 @@ def run_module(uri: str, unsigned: bool = False, engine: str | None = None, do_v
         if not pkg_entry:
             raise SystemExit(f"Package '{package}' not found in artifacts list.")
 
-        pkg_hash = pkg_entry.get("digest", "")
-        verified_path = None
-
-        if do_verify and pkg_hash:
-            from .verify import HashMismatchError, download_and_verify
-
-            print(f"Verifying {package}...", file=sys.stderr)
-            try:
-                verified_path = download_and_verify(resolve_url(pkg_entry["urls"][0]), pkg_hash)
-            except HashMismatchError as exc:
-                raise SystemExit(str(exc))
-            print("Hash verified.", file=sys.stderr)
-            pkg_spec = f"file://{verified_path}"
-        elif do_verify and not pkg_hash:
-            print(f"Warning: no hash in record for {package}, skipping verification.", file=sys.stderr)
-            pkg_spec = resolve_url(pkg_entry["urls"][0])
-        else:
-            pkg_spec = resolve_url(pkg_entry["urls"][0])
+        version = pkg_entry["version"]
+        pkg_spec = f"{package}@{version}"
 
         selected_engine = engine or "pnpm"
         if selected_engine == "bun":

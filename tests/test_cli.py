@@ -132,66 +132,17 @@ def test_install_dry_run(mock_yanks, mock_fetch):
 
 @patch("atrun.run.fetch_record")
 @patch("atrun.run.fetch_yanks", return_value={})
-def test_install_dry_run_node_uses_url(mock_yanks, mock_fetch):
+def test_install_dry_run_node_uses_version(mock_yanks, mock_fetch):
     mock_fetch.return_value = _make_record(
         "cowsay", "1.6.0", "sha256:abc",
         "https://registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz",
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["install", "--dry-run", "--no-verify", "--no-deps", "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
+    result = runner.invoke(cli, ["install", "--dry-run", "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
     assert result.exit_code == 0
-    assert "registry.npmjs.org/cowsay/-/cowsay-1.6.0.tgz" in result.output
-    assert "cowsay@1.6.0" not in result.output
-
-
-@patch("atrun.run.fetch_record")
-@patch("atrun.run.fetch_yanks", return_value={})
-def test_install_dry_run_node_deps_shows_steps(mock_yanks, mock_fetch):
-    """--deps dry-run with --verify shows frozen-lockfile, hash comment, and global install."""
-    url = "https://github.com/example/cowsay/releases/download/v1.6.0/cowsay-1.6.0.tgz"
-    record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
-    record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
-    # Add dependency data to trigger the --deps path
-    record["content"]["artifacts"].append({
-        "name": "string-width", "version": "4.2.3",
-        "digest": "sha256:def", "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
-    })
-    record["content"]["artifacts"][0]["dependencies"] = [1]
-    mock_fetch.return_value = record
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["install", "--dry-run", "--deps", "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
-    assert result.exit_code == 0
-    lines = [l for l in result.output.splitlines() if l.strip() and not l.startswith("Installing")]
-    assert any("pnpm install --frozen-lockfile" in l for l in lines)
-    assert any(l.startswith("# download and verify hash:") for l in lines)
-    assert any("install -g" in l and url in l for l in lines)
-    # Should NOT conflate frozen-lockfile with global install
-    assert not any("--frozen-lockfile" in l and "install -g" in l for l in lines)
-
-
-@patch("atrun.run.fetch_record")
-@patch("atrun.run.fetch_yanks", return_value={})
-def test_install_dry_run_node_deps_no_verify_skips_hash(mock_yanks, mock_fetch):
-    """--deps --no-verify dry-run omits the hash verification comment."""
-    url = "https://github.com/example/cowsay/releases/download/v1.6.0/cowsay-1.6.0.tgz"
-    record = _make_record("cowsay", "1.6.0", "sha256:abc", url)
-    record["content"]["packageType"] = "dev.atpub.defs#npmPackage"
-    record["content"]["artifacts"].append({
-        "name": "string-width", "version": "4.2.3",
-        "digest": "sha256:def", "urls": ["https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"],
-    })
-    record["content"]["artifacts"][0]["dependencies"] = [1]
-    mock_fetch.return_value = record
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["install", "--dry-run", "--no-verify", "--deps", "at://did:plc:abc/dev.atpub.manifest/3mgxyz"])
-    assert result.exit_code == 0
-    lines = [l for l in result.output.splitlines() if l.strip() and not l.startswith("Installing")]
-    assert any("pnpm install --frozen-lockfile" in l for l in lines)
-    assert not any("verify" in l.lower() for l in lines)
-    assert any("install -g" in l and url in l for l in lines)
+    assert "cowsay@1.6.0" in result.output
+    assert "pnpm install -g" in result.output
 
 
 def _mock_httpx_client(data):

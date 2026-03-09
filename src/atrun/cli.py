@@ -1017,23 +1017,20 @@ def fetch(uri: str, directory: str, deps: bool, do_verify: bool, unsigned: bool)
 @cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("uri")
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
-@click.option("--deps", is_flag=True, help="Force frozen lockfile verification using the record's dependency graph. Errors if the record has no dependency data.")
-@click.option("--no-deps", is_flag=True, help="Skip frozen lockfile verification even if the record has dependency data. Installs using the package manager's default resolution.")
 @click.option("--verify/--no-verify", "do_verify", default=True, help="Verify the main package artifact hash before installing (default: --verify).")
 @click.option("--engine", type=click.Choice(["pnpm", "bun", "npm", "docker", "crane"]), default=None, help="Package manager or container engine to use.")
 @click.option("--unsigned", is_flag=True, help="Allow plain HTTPS URLs that are not AT Protocol XRPC endpoints.")
 @click.option("--dry-run", "install_dry_run", is_flag=True, help="Print the install command without executing it.")
-def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do_verify: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
+def install(uri: str, extra_args: tuple[str, ...], do_verify: bool, engine: str | None, unsigned: bool, install_dry_run: bool):
     """Install a package from an AT Protocol record.
 
     Fetches the record, detects the ecosystem, and installs the package
     using the appropriate tool (uv for Python, pnpm/bun/npm for Node,
-    cargo for Rust).
+    cargo for Rust, go install for Go, docker/crane pull for containers).
 
-    By default, uses frozen lockfile verification if the record contains a
-    dependency graph (published with --deps), and falls back to direct
-    install otherwise. Use --deps to require verification, or --no-deps
-    to skip it.
+    The package manager handles its own downloads and integrity
+    verification. Use --verify/--no-verify to control pre-install
+    hash checking for ecosystems that support it (Rust, containers).
 
     Extra arguments after the URI are passed through to the underlying
     package manager.
@@ -1041,19 +1038,15 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
     \b
     Examples:
       atrun install at://did:plc:abc123/dev.atpub.manifest/3mgxyz
-      atrun install --deps at://did:plc:abc123/dev.atpub.manifest/3mgxyz
-      atrun install --no-deps at://did:plc:abc123/dev.atpub.manifest/3mgxyz
+      atrun install @alice.bsky.social:cowsay
+      atrun install --engine bun @alice.bsky.social:cowsay
       atrun install at://did:plc:abc123/dev.atpub.manifest/3mgxyz -- --force
     """
     import shlex
     import subprocess
-    import tempfile
-
-    if deps and no_deps:
-        raise click.ClickException("Cannot use both --deps and --no-deps.")
 
     from .ecosystems import detect_ecosystem_from_artifacts, get_ecosystem
-    from .run import fetch_record, fetch_yanks, generate_requirements
+    from .run import fetch_record, fetch_yanks
 
     result = fetch_record(uri, unsigned=unsigned)
     at_info = result["at"]
@@ -1149,55 +1142,15 @@ def install(uri: str, extra_args: tuple[str, ...], deps: bool, no_deps: bool, do
             env = {**os.environ, "GO111MODULE": "on"}
         subprocess.run(cmd, check=True, env=env)
     else:
-        # Node: determine whether to use verified install
-        has_dep_info = any(e.get("dependencies") for e in artifacts)
-
-        if deps and not has_dep_info:
-            raise click.ClickException("--deps requested but record has no dependency graph.")
-
-        use_verified = has_dep_info and not no_deps if not deps else True
-
-        # Pass engine to node ecosystem functions
+        # Node: install via package manager with version pinning
         engine_kwargs = {}
         if engine and eco_name == "node":
             engine_kwargs["engine"] = engine
-
-        if use_verified:
-            result = eco_mod.run_verified_install(record, extra_args=extra_args, dry_run=install_dry_run, do_verify=do_verify, **engine_kwargs)
-            if install_dry_run and result:
-                click.echo(shlex.join(result))
-        else:
-            # Direct install — verify hash then use local tarball
-            pkg_entry = next((e for e in artifacts if e["name"] == package), None)
-            verified_path = None
-            pkg_spec = _resolve_url(pkg_entry["urls"][0]) if pkg_entry else package
-
-            if do_verify and pkg_entry:
-                pkg_hash = pkg_entry.get("digest", "")
-                if pkg_hash:
-                    from .verify import HashMismatchError, download_and_verify
-
-                    click.echo(f"Verifying {package}...", err=True)
-                    try:
-                        verified_path = download_and_verify(_resolve_url(pkg_entry["urls"][0]), pkg_hash)
-                    except HashMismatchError as exc:
-                        raise click.ClickException(str(exc))
-                    pkg_spec = f"file://{verified_path}"
-                    click.echo("Hash verified.", err=True)
-                else:
-                    click.echo(f"Warning: no hash in record for {package}, skipping verification.", err=True)
-
-            selected_engine = engine or eco_mod.DEFAULT_ENGINE
-            cmd = [selected_engine, "install", "-g", pkg_spec, *extra_args]
-            if install_dry_run:
-                click.echo(shlex.join(cmd))
-                return
-
-            try:
-                subprocess.run(cmd, check=True)
-            finally:
-                if verified_path:
-                    verified_path.unlink(missing_ok=True)
+        cmd = eco_mod.generate_install_args(record, **engine_kwargs) + list(extra_args)
+        if install_dry_run:
+            click.echo(shlex.join(cmd))
+            return
+        subprocess.run(cmd, check=True)
 
 
 @cli.command()

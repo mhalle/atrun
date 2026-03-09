@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.16.0
+
+**Breaking schema changes** — existing records on AT Protocol are incompatible.
+
+- Add `purl` subpackage for Package URL resolution, digest extraction, and unified metadata across all ecosystems
+- Purl-first publish: `--dist-url` accepts `pkg:pypi/name@ver`, `npm:cowsay`, and other purl shorthands alongside raw URLs
+- Multi-URL artifacts: `--dist-url` can be specified multiple times; all go into the artifact's `urls` array
+- Rename artifact field `url` → `urls` (string → array of strings) in lexicon and codebase
+- Rename artifact field `dependencies` from `name@version` strings to integer indices into the `artifacts` array
+- Add `root` field on records: index of the primary artifact in the `artifacts` array
+- Add `purl` field on records: canonical Package URL for the published package
+- Add `--description`, `--license`, `--url` flags to `publish` for overriding extracted metadata
+- Metadata extraction: purl-based registry lookup first, ecosystem download fallback second, CLI flags override
+- Digest resolution: extract hashes from registry APIs (PyPI, npm) without downloading artifacts
+- Remove `--dist-file` flag from `publish` (local file hashing removed; use registry-based publish instead)
+- Remove shorthand resolvers (`npm:`, `crate:`, `go:`, `pypi:`, `docker:`, `gh:`) from publish.py — replaced by purl subsystem
+- Python run uses `uvx --from package==version` instead of downloading and verifying wheels
+- Add `purl2meta` dependency
+- Fix ecosystem detection: `elif` chain → flat `if` chain so all fallbacks (purl, lockfile, URL) are consulted
+- Fix `publish()` return type annotation: `-> str` → `-> tuple[str, str | None]`
+- Remove dead code: `generate_run_args` and `extract_local_dist_metadata` from python ecosystem
+- Remove stale `sha256` fallback in `generate_requirements`
+- Unify `resolve_url` import in `run.py` (remove `_resolve_url` alias)
+- Hoist `import re` to top-level in `publish.py`
+- CI: auto-create GitHub Release with dist assets on tag push, publish AT Protocol record with PyPI URL
+
 ## 0.15.1
 
 - Add `remove` command for permanently deleting published records (with confirmation prompt, `--yes` to skip)

@@ -36,7 +36,7 @@
           },
           "packageType": {
             "type": "string",
-            "description": "Type of package contained in this manifest.",
+            "description": "Type of content in this manifest (software package, document, dataset, container image, etc.).",
             "knownValues": [
               "dev.atpub.defs#pythonPackage",
               "dev.atpub.defs#npmPackage",
@@ -54,7 +54,7 @@
           },
           "metadata": {
             "type": "object",
-            "description": "Free-form metadata specific to the package type. Keys use camelCase per AT Protocol conventions."
+            "description": "Free-form metadata specific to the content type. Keys use camelCase per AT Protocol conventions."
           },
           "root": {
             "type": "integer",

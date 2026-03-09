@@ -297,9 +297,6 @@ def build_record(
         if field in dist_meta:
             record[field] = dist_meta[field]
 
-    if first_purl:
-        record["purl"] = first_purl
-
     # packageType from ecosystem
     package_type = PACKAGE_TYPES.get(ecosystem)
     if package_type:

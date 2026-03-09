@@ -54,7 +54,7 @@
           },
           "metadata": {
             "type": "object",
-            "description": "Free-form metadata specific to the content type. Keys use camelCase per AT Protocol conventions."
+            "description": "Free-form metadata specific to the content type. Keys use camelCase per AT Protocol conventions. The reserved key \"dev.atpub#ref\" holds a com.atproto.repo.strongRef linking to a related AT Protocol record."
           },
           "root": {
             "type": "integer",
@@ -99,7 +99,7 @@
           "type": "array",
           "items": { "type": "string", "format": "uri" },
           "maxLength": 32,
-          "description": "Download URLs, evaluated first to last."
+          "description": "Download URLs for the same content. All URLs must resolve to byte-identical data matching the digest. Clients may select among them based on preference or availability."
         },
         "artifactType": {
           "type": "string",
@@ -114,7 +114,7 @@
         },
         "metadata": {
           "type": "object",
-          "description": "Free-form metadata specific to this artifact."
+          "description": "Free-form metadata specific to this artifact. The reserved key \"dev.atpub#ref\" holds a com.atproto.repo.strongRef linking to a related AT Protocol record."
         },
         "ref": {
           "type": "ref",

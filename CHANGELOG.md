@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.0
+
+- Add `lexicons/SPEC.md`: full specification for `dev.atpub.manifest` and `dev.atpub.yank` record types, with motivation, design decisions, and examples for software packages, academic papers, and retractions
+- Add cursor-based pagination to all `listRecords` call sites — users with >100 records no longer silently lose data
+- Add `_list_all_records_xrpc` helper (public XRPC) and `_list_all_records_client` helper (authenticated) for paginated record listing
+- Add missing `from pathlib import Path` import in `node.py`
+- Relax lexicon limits: `description` 1024→10240 (supports full abstracts), artifact `urls` 16→32
+- Update artifact `urls` semantics: all URLs must be byte-identical per the digest; clients choose by preference, not evaluation order
+- Document `dev.atpub#ref` as a reserved metadata key for `com.atproto.repo.strongRef` linking to related AT Protocol records
+- Broaden lexicon descriptions from "package type" to "content type" for non-software use cases (documents, datasets)
+- Clarify `license` field as SPDX identifier or expression
+- Remove dead Rust verify-then-discard block in `run_module` (downloaded and verified tarball was thrown away since `cargo install` re-downloads)
+- Remove unused `from .purl import resolve_url` import
+- Remove top-level `purl` field from published records — purls belong in artifact `urls` arrays
+- Update `run_module` docstring to accurately describe ecosystem delegation
+
 ## 0.16.0
 
 **Breaking schema changes** — existing records on AT Protocol are incompatible.
